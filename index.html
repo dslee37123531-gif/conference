@@ -1,0 +1,999 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>회의록 분석</title>
+<style>
+:root{--bg:#f5f6f4;--card:#fff;--ink:#1d2421;--muted:#5d6a64;--line:#dde3df;--accent:#1f6b52;--accent-ink:#fff;--accent-bg:#e3f1eb;--warn:#8a5a00;--warn-bg:#fdf3dc;--bad:#b42323;--bad-bg:#fbe7e7;--rec:#d23b3b;--field:#fff;--mark:#ffe58a}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#131715;--card:#1b201e;--ink:#e6ebe8;--muted:#9aa7a1;--line:#2e3633;--accent:#6fc9a6;--accent-ink:#0f1a15;--accent-bg:#1d3a30;--warn:#f0c46a;--warn-bg:#3a2f16;--bad:#f08a8a;--bad-bg:#3d1f1f;--rec:#ff6b6b;--field:#141816;--mark:#6b5a13}}
+:root[data-theme="dark"]{--bg:#131715;--card:#1b201e;--ink:#e6ebe8;--muted:#9aa7a1;--line:#2e3633;--accent:#6fc9a6;--accent-ink:#0f1a15;--accent-bg:#1d3a30;--warn:#f0c46a;--warn-bg:#3a2f16;--bad:#f08a8a;--bad-bg:#3d1f1f;--rec:#ff6b6b;--field:#141816;--mark:#6b5a13}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 "Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;word-break:keep-all;overflow-wrap:anywhere}
+button,input,select,textarea{font:inherit;color:inherit}
+.top{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line)}
+.top-in{max-width:1080px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{font-weight:800;font-size:17px}
+nav.tabs{display:flex;gap:4px;flex-wrap:wrap}
+nav.tabs button{border:0;background:none;padding:7px 12px;border-radius:8px;cursor:pointer;color:var(--muted);min-height:40px}
+nav.tabs button[aria-current="page"]{background:var(--accent-bg);color:var(--accent);font-weight:700}
+.local{margin-left:auto;font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+main{max-width:1080px;margin:0 auto;padding:20px 16px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
+.card h2{font-size:18px;margin:0 0 12px}
+.card h3{font-size:15px;margin:18px 0 8px}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:8px 16px;border-radius:10px;border:1px solid var(--line);background:var(--card);cursor:pointer;font-weight:600}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.rec{background:var(--rec);border-color:var(--rec);color:#fff}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.btn.small{min-height:34px;padding:4px 10px;font-size:13px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.types{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.type-btn{min-height:64px;border:2px solid var(--line);border-radius:12px;background:var(--card);cursor:pointer;padding:8px;text-align:center}
+.type-btn b{display:block;font-size:20px}
+.type-btn[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-bg)}
+.type-btn:disabled{cursor:not-allowed;opacity:.55}
+@media (max-width:640px){.types{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.recbox{text-align:center;padding:10px 0}
+.timer{font-size:48px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:1px}
+.state{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;background:var(--bg);border:1px solid var(--line);font-weight:700}
+.state .dot{width:10px;height:10px;border-radius:50%;background:var(--muted)}
+.state.recording .dot{background:var(--rec);animation:blink 1s infinite}
+.state.paused .dot{background:var(--warn)}
+@keyframes blink{50%{opacity:.2}}
+.rec-controls{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:16px}
+.rec-controls .btn{min-height:52px}
+@media (max-width:520px){.rec-controls{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.meter{height:6px;background:var(--bg);border-radius:4px;overflow:hidden;margin:12px auto 0;max-width:320px}
+.meter i{display:block;height:100%;width:0;background:var(--accent);transition:width .1s}
+.alert{border-radius:10px;padding:10px 14px;margin:12px 0;border-left:4px solid}
+.alert.err{background:var(--bad-bg);border-color:var(--bad)}
+.alert.warn{background:var(--warn-bg);border-color:var(--warn)}
+.alert.ok{background:var(--accent-bg);border-color:var(--accent)}
+.badge{display:inline-block;font-size:12px;font-weight:700;padding:1px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+.badge.ok{color:var(--accent);border-color:var(--accent)}
+.badge.review{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.badge.none{color:var(--muted)}
+.dialog-back{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
+.dialog{background:var(--card);border-radius:16px;max-width:460px;width:100%;padding:22px;max-height:90vh;overflow:auto}
+.dialog h2{margin:0 0 12px;font-size:19px}
+dl.meta{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0}
+dl.meta dt{color:var(--muted)}
+dl.meta dd{margin:0}
+.dialog .actions{display:grid;gap:8px;margin-top:18px}
+.list{display:grid;gap:10px}
+.mcard{border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;background:var(--card);text-align:left;width:100%}
+.mcard:hover{border-color:var(--accent)}
+.mcard .t{font-weight:700}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.stat b{display:block;font-size:26px;color:var(--accent)}
+.stat span{font-size:13px;color:var(--muted)}
+@media (max-width:640px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.filters{display:grid;grid-template-columns:1fr 1fr 2fr;gap:8px;margin-bottom:12px}
+@media (max-width:640px){.filters{grid-template-columns:1fr}}
+input[type=text],input[type=search],select,textarea{width:100%;background:var(--field);border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:16px}
+textarea{min-height:120px;resize:vertical;line-height:1.6}
+label.f{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+.back{border:0;background:none;color:var(--accent);cursor:pointer;padding:6px 0;font-weight:600}
+.sub-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.sub-tabs button{border:0;background:none;padding:8px 12px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;min-height:40px}
+.sub-tabs button[aria-selected="true"]{color:var(--accent);border-color:var(--accent);font-weight:700}
+.summary{background:var(--accent-bg);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.summary .title{font-size:18px;font-weight:800;margin:2px 0 4px}
+.agenda{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:8px 0}
+.agenda .head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-weight:700}
+.imp{font-size:12px;padding:1px 8px;border-radius:6px;background:var(--bg);border:1px solid var(--line)}
+.imp.high{background:var(--bad);color:#fff;border-color:var(--bad)}
+.quote{border-left:3px solid var(--line);padding-left:10px;color:var(--muted);font-size:13px;margin:6px 0}
+.ev{border:0;background:none;color:var(--accent);cursor:pointer;font-size:13px;padding:0;text-decoration:underline}
+.decision{border:1px solid var(--accent);border-radius:10px;padding:8px 12px;margin-top:8px}
+.reason{color:var(--warn);font-size:13px}
+.action{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0;display:grid;grid-template-columns:auto 1fr;gap:10px}
+.action input[type=checkbox]{width:22px;height:22px;margin-top:2px}
+.action.done .task{text-decoration:line-through;color:var(--muted)}
+.unassigned{font-style:italic;color:var(--muted)}
+.transcript{white-space:pre-wrap;line-height:1.8;background:var(--bg);border-radius:10px;padding:14px;max-height:480px;overflow:auto}
+mark{background:var(--mark);color:inherit;border-radius:3px}
+.edit-item{border:1px dashed var(--line);border-radius:12px;padding:12px;margin:10px 0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media (max-width:640px){.grid2{grid-template-columns:1fr}}
+audio{width:100%;max-width:520px}
+.empty{text-align:center;padding:30px 10px;color:var(--muted)}
+details.privacy{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-top:12px;font-size:14px}
+details.privacy summary{cursor:pointer;font-weight:600}
+.rename{display:grid;grid-template-columns:32px 1fr auto;gap:8px;align-items:center;margin:6px 0}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:30;max-width:90vw}
+#print-area{display:none}
+@media print{body>*:not(#print-area){display:none!important}#print-area{display:block!important;color:#000;font-size:11pt}#print-area table{border-collapse:collapse;width:100%}#print-area td,#print-area th{border:1px solid #444;padding:4px 6px;text-align:left}#print-area h1{text-align:center;font-size:18pt}#print-area h2{font-size:13pt;margin-top:18pt}.rv{color:#a15c00}}
+</style>
+</head>
+<body>
+<header class="top"><div class="top-in">
+  <div class="brand">회의록 분석</div>
+  <nav class="tabs" aria-label="화면">
+    <button data-tab="record" aria-current="page">녹음</button>
+    <button data-tab="meetings">회의 기록</button>
+    <button data-tab="dashboard">결과 대시보드</button>
+    <button data-tab="settings">설정</button>
+  </nav>
+  <span class="local" title="모든 데이터는 이 브라우저(IndexedDB)에만 저장됩니다">이 브라우저에만 저장</span>
+</div></header>
+<main id="app"></main>
+<div id="print-area"></div>
+
+<script>
+"use strict";
+/* =========================================================================
+   회의록 분석 — 단일 파일판
+   - 서버 없이 브라우저에서 동작: 녹음·저장·재생·다운로드, 회의록 입력·수정,
+     회의 결과(안건·결정·후속 조치) 정리와 근거 확인, 대시보드, HWPX 보고서.
+   - 데이터는 이 브라우저의 IndexedDB에만 저장된다.
+   - 자동 음성 전사·AI 요약은 API 키가 필요하므로 이 파일에는 넣지 않았다
+     (키를 화면 코드에 넣지 않는 원칙). 서버판에서 환경 변수로 설정해 사용한다.
+   - 예시·임의 데이터는 없다. 화면의 모든 내용은 사용자가 녹음·입력한 것이다.
+   ========================================================================= */
+
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const UNASSIGNED = "미지정";
+const IMPORTANCE = { high: "높음", medium: "보통", low: "낮음" };
+const MAX_TXT_BYTES = 2 * 1024 * 1024;
+
+function cleanText(s) {
+  return String(s ?? "").replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f￾￿]/g, "").replace(/[\ud800-\udfff]/g, (c, i, str) => {
+    // 짝이 맞는 서로게이트(이모지 등)는 유지하고 외톨이만 제거
+    const code = c.charCodeAt(0);
+    if (code <= 0xdbff) { const n = str.charCodeAt(i + 1); return n >= 0xdc00 && n <= 0xdfff ? c : ""; }
+    const p = str.charCodeAt(i - 1); return p >= 0xd800 && p <= 0xdbff ? c : "";
+  }).normalize("NFC");
+}
+const cleanLine = (s) => cleanText(s).replace(/\s+/g, " ").trim();
+const pad = (n) => String(n).padStart(2, "0");
+const hms = (sec) => { const s = Math.max(0, Math.round(sec)); return `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s % 3600 / 60))}:${pad(s % 60)}`; };
+const fmtDate = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const fmtTime = (iso) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+const krDate = (d) => `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
+const stamp = (iso) => { const d = new Date(iso); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`; };
+const safeName = (s) => cleanLine(s).replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_").slice(0, 40) || "회의";
+const fmtSize = (b) => b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`;
+
+function toast(msg) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; t.setAttribute("role", "status");
+  document.body.appendChild(t); setTimeout(() => t.remove(), 2600);
+}
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob); const a = document.createElement("a");
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/* ---------------- 저장소 (IndexedDB) ---------------- */
+const DB = {
+  db: null,
+  async open() {
+    if (this.db) return this.db;
+    this.db = await new Promise((res, rej) => {
+      let r;
+      try { r = indexedDB.open("meeting-recorder-local", 1); } catch (e) { rej(e); return; }
+      r.onupgradeneeded = () => {
+        const d = r.result;
+        d.createObjectStore("meetings", { keyPath: "id", autoIncrement: true });
+        d.createObjectStore("audio");
+        d.createObjectStore("settings");
+      };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    return this.db;
+  },
+  async tx(stores, mode, fn) {
+    const d = await this.open();
+    return new Promise((res, rej) => {
+      const t = d.transaction(stores, mode); let out;
+      Promise.resolve(fn(t)).then((v) => (out = v));
+      t.oncomplete = () => res(out); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error("저장이 취소되었습니다"));
+    });
+  },
+  req: (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }),
+  async all() { return this.tx(["meetings"], "readonly", (t) => this.req(t.objectStore("meetings").getAll())); },
+  async get(id) { return this.tx(["meetings"], "readonly", (t) => this.req(t.objectStore("meetings").get(id))); },
+  async put(m) { return this.tx(["meetings"], "readwrite", (t) => this.req(t.objectStore("meetings").put(m))); },
+  async addWithAudio(m, blob) {
+    // 회의 정보와 음성을 한 트랜잭션에 저장한다(둘 중 하나만 남지 않도록)
+    return this.tx(["meetings", "audio"], "readwrite", (t) => new Promise((res) => {
+      const r = t.objectStore("meetings").add(m);
+      r.onsuccess = () => { t.objectStore("audio").put(blob, r.result); res(r.result); };
+    }));
+  },
+  async audio(id) { return this.tx(["audio"], "readonly", (t) => this.req(t.objectStore("audio").get(id))); },
+  async remove(id) { return this.tx(["meetings", "audio"], "readwrite", (t) => { t.objectStore("meetings").delete(id); t.objectStore("audio").delete(id); }); },
+  async clearAll() { return this.tx(["meetings", "audio"], "readwrite", (t) => { t.objectStore("meetings").clear(); t.objectStore("audio").clear(); }); },
+  async getSetting(k) { return this.tx(["settings"], "readonly", (t) => this.req(t.objectStore("settings").get(k))); },
+  async setSetting(k, v) { return this.tx(["settings"], "readwrite", (t) => this.req(t.objectStore("settings").put(v, k))); },
+};
+
+/* ---------------- 상태 ---------------- */
+const S = {
+  tab: "record", detailId: null, detailTab: "result", editing: false, highlight: null,
+  types: [1, 2, 3, 4, 5].map((id) => ({ id, name: `회의 종류 ${id}` })),
+  dbError: null,
+  filters: { type: "", status: "", q: "" },
+};
+const typeName = (id) => (S.types.find((t) => t.id === id) || { name: `회의 종류 ${id}` }).name;
+
+/* ---------------- 녹음 ---------------- */
+const R = {
+  state: "idle", // idle | requesting | recording | paused | stopping | confirm | saving | saved | error
+  typeId: null, error: null, notice: null,
+  stream: null, recorder: null, chunks: [], mime: "",
+  startedAt: null, elapsed: 0, runStart: 0, timerId: null,
+  blob: null, endedAt: null, savedId: null, discardAsk: false,
+  audioCtx: null, analyser: null, raf: 0,
+};
+const STATE_LABEL = { idle: "대기", requesting: "마이크 확인 중", recording: "녹음 중", paused: "일시정지", stopping: "정지 중", confirm: "저장 확인", saving: "저장 중", saved: "저장 완료", error: "오류" };
+const busy = () => ["requesting", "recording", "paused", "stopping", "confirm", "saving"].includes(R.state);
+const elapsedNow = () => R.elapsed + (R.state === "recording" ? (performance.now() - R.runStart) / 1000 : 0);
+
+function pickMime() {
+  const c = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+  if (typeof MediaRecorder === "undefined") return null;
+  return c.find((m) => MediaRecorder.isTypeSupported?.(m)) || "";
+}
+const extOf = (mime) => /ogg/.test(mime) ? "ogg" : /mp4|m4a|aac/.test(mime) ? "m4a" : "webm";
+
+function micErrorMessage(e) {
+  const n = e && e.name;
+  if (n === "NotAllowedError" || n === "SecurityError") return "마이크 사용 권한이 거부되었습니다. 브라우저 주소창의 마이크 아이콘(또는 사이트 설정)에서 허용한 뒤 다시 시작하세요.";
+  if (n === "NotFoundError" || n === "OverconstrainedError") return "연결된 마이크를 찾을 수 없습니다. 마이크를 연결한 뒤 다시 시작하세요.";
+  if (n === "NotReadableError" || n === "AbortError") return "마이크를 열 수 없습니다. 다른 프로그램(화상회의 등)이 마이크를 쓰고 있는지 확인하세요.";
+  if (n === "NotSupportedError" || n === "TypeError") return "이 브라우저 환경에서는 마이크를 열 수 없습니다. 최신 Chrome·Edge·Firefox·Safari에서 파일을 직접 열거나 https 주소에서 사용하세요.";
+  return `녹음을 시작하지 못했습니다: ${e && e.message ? e.message : e}`;
+}
+
+async function startRecording() {
+  if (busy()) return;
+  if (!R.typeId) { R.error = "회의 종류를 먼저 선택하세요."; render(); return; }
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    R.state = "error"; R.error = "이 환경에서는 마이크를 사용할 수 없습니다. 파일을 내려받아 Chrome·Edge 등 최신 브라우저로 직접 열거나 https 주소에서 여세요."; render(); return;
+  }
+  const mime = pickMime();
+  if (mime === null) { R.state = "error"; R.error = "이 브라우저는 녹음(MediaRecorder)을 지원하지 않습니다. 최신 Chrome·Edge·Firefox·Safari를 사용하세요."; render(); return; }
+  R.state = "requesting"; R.error = null; R.notice = null; R.savedId = null; render();
+  try {
+    R.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  } catch (e) { R.state = "error"; R.error = micErrorMessage(e); render(); return; }
+  try {
+    R.recorder = new MediaRecorder(R.stream, mime ? { mimeType: mime } : undefined);
+  } catch (e) { stopTracks(); R.state = "error"; R.error = `녹음기를 만들지 못했습니다: ${e.message || e}`; render(); return; }
+  R.mime = R.recorder.mimeType || mime || "audio/webm";
+  R.chunks = [];
+  R.recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) R.chunks.push(ev.data); };
+  R.recorder.onerror = (ev) => { R.notice = `녹음 중 오류가 발생했습니다(${ev.error?.name || "알 수 없음"}). 지금까지 녹음된 내용을 저장할 수 있습니다.`; finishRecording(); };
+  R.recorder.onstop = onRecorderStopped;
+  R.stream.getAudioTracks().forEach((t) => (t.onended = () => {
+    if (R.state === "recording" || R.state === "paused") { R.notice = "녹음 중 마이크 연결이 끊어졌습니다. 지금까지 녹음된 내용을 저장할 수 있습니다."; finishRecording(); }
+  }));
+  R.recorder.start(1000);
+  R.startedAt = new Date().toISOString(); R.elapsed = 0; R.runStart = performance.now();
+  R.state = "recording";
+  startMeter(); tick(); render();
+}
+function pauseRecording() {
+  if (R.state !== "recording" || R.recorder?.state !== "recording") return;
+  R.recorder.pause(); R.elapsed += (performance.now() - R.runStart) / 1000; R.state = "paused"; render();
+}
+function resumeRecording() {
+  if (R.state !== "paused" || R.recorder?.state !== "paused") return;
+  R.recorder.resume(); R.runStart = performance.now(); R.state = "recording"; render();
+}
+function finishRecording() {
+  if (!(R.state === "recording" || R.state === "paused")) return;
+  if (R.state === "recording") R.elapsed += (performance.now() - R.runStart) / 1000;
+  R.state = "stopping"; render();
+  if (R.recorder && R.recorder.state !== "inactive") R.recorder.stop(); else onRecorderStopped();
+}
+function onRecorderStopped() {
+  stopTracks(); stopMeter(); clearInterval(R.timerId);
+  R.endedAt = new Date().toISOString();
+  R.blob = new Blob(R.chunks, { type: (R.mime || "audio/webm").split(";")[0] });
+  if (!R.blob.size) { R.state = "error"; R.error = "녹음된 소리가 없습니다. 마이크를 확인하고 다시 녹음하세요."; R.blob = null; render(); return; }
+  R.state = "confirm"; R.discardAsk = false; render();
+}
+function stopTracks() { R.stream?.getTracks().forEach((t) => { t.onended = null; t.stop(); }); R.stream = null; }
+function tick() {
+  clearInterval(R.timerId);
+  R.timerId = setInterval(() => { const el = $("#timer"); if (el) el.textContent = hms(elapsedNow()); }, 250);
+}
+function startMeter() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    R.audioCtx = new AC(); const src = R.audioCtx.createMediaStreamSource(R.stream);
+    R.analyser = R.audioCtx.createAnalyser(); R.analyser.fftSize = 512; src.connect(R.analyser);
+    const buf = new Uint8Array(R.analyser.fftSize);
+    const loop = () => {
+      R.analyser.getByteTimeDomainData(buf); let peak = 0;
+      for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
+      const el = $("#meter i"); if (el) el.style.width = (R.state === "recording" ? Math.min(100, peak / 64 * 100) : 0) + "%";
+      R.raf = requestAnimationFrame(loop);
+    };
+    loop();
+  } catch { /* 소리 크기 표시는 선택 기능 */ }
+}
+function stopMeter() { cancelAnimationFrame(R.raf); try { R.audioCtx?.close(); } catch { } R.audioCtx = null; }
+const recFileName = () => `${safeName(typeName(R.typeId))}_${stamp(R.startedAt)}.${extOf(R.mime)}`;
+
+async function saveRecording() {
+  if (R.state !== "confirm" || !R.blob) return;
+  R.state = "saving"; render();
+  const m = {
+    typeId: R.typeId, startedAt: R.startedAt, endedAt: R.endedAt, durationSec: Math.round(R.elapsed * 10) / 10,
+    mime: R.blob.type, size: R.blob.size, fileName: recFileName(), createdAt: new Date().toISOString(),
+    transcript: null, analysis: null,
+  };
+  try {
+    R.savedId = await DB.addWithAudio(m, R.blob);
+    R.state = "saved"; R.blob = null; R.notice = null;
+  } catch (e) {
+    R.state = "confirm";
+    R.error = `브라우저 저장소에 저장하지 못했습니다(${e?.name || e}). 저장 공간이 부족하거나 시크릿 창일 수 있습니다. ‘내 컴퓨터에 내려받기’로 먼저 보관하세요.`;
+  }
+  render();
+}
+function discardRecording() { R.blob = null; R.chunks = []; R.state = "idle"; R.discardAsk = false; R.notice = null; R.error = null; toast("녹음을 버렸습니다. 저장된 내용은 없습니다."); render(); }
+window.addEventListener("beforeunload", (e) => { if (busy()) { e.preventDefault(); e.returnValue = ""; } });
+
+/* ---------------- 근거 확인 ---------------- */
+const norm = (s) => cleanText(s).replace(/\s+/g, " ").trim();
+function inTranscript(m, q) { const t = norm(m.transcript?.text || ""); const n = norm(q); return !!n && t.includes(n); }
+function evidenceReview(m, quote) {
+  if (!norm(quote)) return "근거 문장이 입력되지 않았습니다";
+  if (!inTranscript(m, quote)) return "근거 문장을 회의록에서 찾지 못했습니다";
+  return null;
+}
+function reviewOf(m, kind, x) {
+  const reasons = [];
+  if (kind === "agenda") { const r = evidenceReview(m, x.evidence); if (r) reasons.push(r); }
+  if (kind === "decision") { const r = evidenceReview(m, x.decisionEvidence); if (r) reasons.push(r); }
+  if (kind === "action") {
+    const r = evidenceReview(m, x.evidence); if (r) reasons.push(r);
+    if (norm(x.assignee) && !inTranscript(m, x.assignee)) reasons.push("담당자가 회의록에 나오지 않습니다");
+    if (norm(x.due) && !inTranscript(m, x.due)) reasons.push("기한이 회의록에 나오지 않습니다");
+  }
+  const confirmed = kind === "decision" ? x.decisionConfirmed : x.confirmed;
+  return reasons.length && !confirmed ? reasons.join("; ") : null;
+}
+function hashText(s) { let h = 2166136261; for (const c of norm(s)) { h ^= c.codePointAt(0); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16); }
+const isStale = (m) => m.analysis && m.transcript && m.analysis.transcriptHash !== hashText(m.transcript.text);
+function reviewCount(m) {
+  const a = m.analysis; if (!a) return 0; let n = 0;
+  for (const g of a.agendas) { if (reviewOf(m, "agenda", g)) n++; if (norm(g.decision) && reviewOf(m, "decision", g)) n++; }
+  for (const x of a.actions) if (reviewOf(m, "action", x)) n++;
+  return n;
+}
+
+/* ---------------- 화면 ---------------- */
+function render() {
+  document.querySelectorAll("nav.tabs button").forEach((b) => { if (b.dataset.tab === S.tab) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
+  const app = $("#app");
+  if (S.dbError) app.innerHTML = `<div class="alert err" role="alert">이 브라우저의 저장소(IndexedDB)를 열 수 없어 녹음을 저장할 수 없습니다: ${esc(S.dbError)}<br>시크릿 창이거나 사이트 데이터 저장이 차단되었을 수 있습니다. 녹음 후 ‘내 컴퓨터에 내려받기’는 사용할 수 있습니다.</div>`;
+  else app.innerHTML = "";
+  const box = document.createElement("div"); app.appendChild(box);
+  if (S.tab === "record") renderRecord(box);
+  else if (S.tab === "meetings") (S.detailId ? renderDetail(box) : renderMeetings(box));
+  else if (S.tab === "dashboard") renderDashboard(box);
+  else renderSettings(box);
+}
+
+function privacyHtml(open) {
+  return `<details class="privacy"${open ? " open" : ""}><summary>녹음·개인정보 안내</summary><ul>
+  <li>녹음을 시작하기 전에 참석자에게 녹음 사실과 목적을 알리고 동의를 받으세요.</li>
+  <li>녹음·회의록·결과는 <b>이 브라우저의 저장소(IndexedDB)에만</b> 보관되며 외부 서버로 전송되지 않습니다. 브라우저의 사이트 데이터를 지우면 함께 지워집니다.</li>
+  <li>같은 PC·같은 브라우저를 쓰는 다른 사람도 볼 수 있습니다. 공용 PC에서는 사용 후 ‘설정 → 모든 데이터 지우기’를 하세요.</li>
+  <li>회의 상세의 ‘삭제’를 누르면 원본 음성·회의록·결과가 함께 지워집니다.</li></ul></details>`;
+}
+
+function renderRecord(box) {
+  const st = R.state;
+  const lockTypes = busy();
+  box.innerHTML = `
+  <section class="card">
+    <h2>회의 종류 선택</h2>
+    <div class="types" role="group" aria-label="회의 종류">
+      ${S.types.map((t) => `<button class="type-btn" data-type="${t.id}" aria-pressed="${R.typeId === t.id}" ${lockTypes ? "disabled" : ""}><b>${t.id}</b><span class="small">${esc(t.name)}</span></button>`).join("")}
+    </div>
+    ${lockTypes ? `<p class="muted small">녹음 중에는 회의 종류를 바꿀 수 없습니다.</p>` : ""}
+  </section>
+  <section class="card">
+    <div class="recbox">
+      <div class="state ${st}" data-testid="rec-state"><span class="dot"></span>${STATE_LABEL[st]}</div>
+      <div class="timer" id="timer" aria-live="off">${hms(st === "idle" || st === "error" ? 0 : elapsedNow())}</div>
+      <div class="muted small">${R.typeId ? esc(typeName(R.typeId)) : "회의 종류를 선택하세요"}${st === "paused" ? " · 일시정지 시간은 녹음 시간에 넣지 않습니다" : ""}</div>
+      <div class="meter" id="meter" aria-hidden="true"><i></i></div>
+    </div>
+    <div class="rec-controls">
+      <button class="btn rec" id="b-start" ${(!R.typeId || busy()) ? "disabled" : ""}>● 녹음 시작</button>
+      <button class="btn" id="b-pause" ${st !== "recording" ? "disabled" : ""}>❚❚ 일시정지</button>
+      <button class="btn" id="b-resume" ${st !== "paused" ? "disabled" : ""}>▶ 다시 시작</button>
+      <button class="btn primary" id="b-stop" ${!(st === "recording" || st === "paused") ? "disabled" : ""}>■ 정지</button>
+    </div>
+    ${R.error ? `<div class="alert err" role="alert" data-testid="rec-error">${esc(R.error)}</div>` : ""}
+    ${R.notice && st !== "confirm" ? `<div class="alert warn">${esc(R.notice)}</div>` : ""}
+    ${st === "saved" ? `<div class="alert ok" data-testid="saved">녹음을 저장했습니다. <button class="btn small" id="b-open-saved">회의 기록에서 보기</button></div>` : ""}
+    ${privacyHtml(false)}
+  </section>
+  <section class="card">
+    <h2>이 파일로 할 수 있는 것</h2>
+    <ul class="small">
+      <li>녹음 → 저장 → 재생·내려받기 → 회의록 입력(녹음을 들으며 작성하거나 다른 곳의 전사본 붙여넣기·.txt 불러오기) → 안건·결정·후속 조치 정리 → 대시보드 → <b>HWPX 보고서</b>·인쇄(PDF)</li>
+      <li class="muted">자동 음성 전사·AI 요약은 API 키가 필요해 이 파일에는 넣지 않았습니다(키를 화면 코드에 두지 않음). 서버판에서 환경 변수로 설정해 사용하세요.</li>
+    </ul>
+  </section>
+  ${st === "confirm" || st === "saving" ? confirmDialogHtml() : ""}`;
+  box.querySelectorAll(".type-btn").forEach((b) => b.onclick = () => { if (busy()) return; R.typeId = +b.dataset.type; R.error = null; if (R.state === "saved" || R.state === "error") R.state = "idle"; render(); });
+  $("#b-start", box).onclick = startRecording;
+  $("#b-pause", box).onclick = pauseRecording;
+  $("#b-resume", box).onclick = resumeRecording;
+  $("#b-stop", box).onclick = finishRecording;
+  const os = $("#b-open-saved", box); if (os) os.onclick = () => { S.tab = "meetings"; S.detailId = R.savedId; S.detailTab = "result"; R.state = "idle"; render(); };
+  if (st === "confirm" || st === "saving") bindConfirm(box);
+}
+
+function confirmDialogHtml() {
+  const saving = R.state === "saving";
+  return `<div class="dialog-back"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t" data-testid="save-dialog">
+    <h2 id="dlg-t">녹음을 저장할까요?</h2>
+    ${R.notice ? `<div class="alert warn">${esc(R.notice)}</div>` : ""}
+    <dl class="meta">
+      <dt>회의 종류</dt><dd>${esc(typeName(R.typeId))}</dd>
+      <dt>시작</dt><dd>${fmtDate(R.startedAt)} ${fmtTime(R.startedAt)}</dd>
+      <dt>녹음 시간</dt><dd data-testid="dlg-duration">${hms(R.elapsed)}</dd>
+      <dt>크기·형식</dt><dd>${R.blob ? fmtSize(R.blob.size) : ""} · ${esc(extOf(R.mime))}</dd>
+      <dt>파일 이름</dt><dd class="small">${esc(recFileName())}</dd>
+    </dl>
+    ${R.error ? `<div class="alert err" role="alert">${esc(R.error)}</div>` : ""}
+    ${R.discardAsk ? `<div class="alert warn">저장하지 않고 버리면 이 녹음은 되돌릴 수 없습니다.
+        <div class="row" style="margin-top:8px"><button class="btn danger" id="d-discard-yes">버리기</button><button class="btn" id="d-discard-no">돌아가기</button></div></div>` :
+      `<div class="actions">
+        <button class="btn primary" id="d-save" ${saving ? "disabled" : ""}>${saving ? "저장 중…" : "저장"}</button>
+        <button class="btn" id="d-download" ${saving ? "disabled" : ""}>내 컴퓨터에 내려받기</button>
+        <button class="btn" id="d-cancel" ${saving ? "disabled" : ""}>취소 (저장하지 않음)</button>
+      </div>`}
+  </div></div>`;
+}
+function bindConfirm(box) {
+  const on = (id, f) => { const el = $(id, box); if (el) el.onclick = f; };
+  on("#d-save", saveRecording);
+  on("#d-download", () => R.blob && downloadBlob(R.blob, recFileName()));
+  on("#d-cancel", () => { R.discardAsk = true; render(); });
+  on("#d-discard-yes", discardRecording);
+  on("#d-discard-no", () => { R.discardAsk = false; render(); });
+  setTimeout(() => $("#d-save", box)?.focus(), 0);
+}
+
+/* ---- 회의 기록 ---- */
+const txStatus = (m) => m.transcript && norm(m.transcript.text) ? "작성됨" : "없음";
+const anStatus = (m) => m.analysis ? (isStale(m) ? "다시 확인 필요" : "작성됨") : "없음";
+function statusBadge(label) { return `<span class="badge ${label === "작성됨" ? "ok" : label === "없음" ? "none" : "review"}">${esc(label)}</span>`; }
+
+async function loadMeetings() {
+  try { return (await DB.all()).sort((a, b) => b.startedAt.localeCompare(a.startedAt)); }
+  catch (e) { S.dbError = e?.message || String(e); return []; }
+}
+function applyFilters(list) {
+  const f = S.filters, q = norm(f.q).toLowerCase();
+  return list.filter((m) => {
+    if (f.type && m.typeId !== +f.type) return false;
+    if (f.status === "no-transcript" && txStatus(m) !== "없음") return false;
+    if (f.status === "no-analysis" && m.analysis) return false;
+    if (f.status === "review" && !(reviewCount(m) || isStale(m))) return false;
+    if (q) {
+      const hay = [typeName(m.typeId), m.analysis?.title, m.analysis?.summary, m.transcript?.text,
+        ...(m.analysis?.agendas || []).flatMap((g) => [g.title, g.decision]), ...(m.analysis?.actions || []).map((x) => x.task)].join(" ").toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+function filterBar() {
+  return `<div class="filters">
+    <select id="f-type" aria-label="회의 종류"><option value="">모든 회의 종류</option>${S.types.map((t) => `<option value="${t.id}" ${S.filters.type == t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select>
+    <select id="f-status" aria-label="상태"><option value="">모든 상태</option>
+      <option value="no-transcript" ${S.filters.status === "no-transcript" ? "selected" : ""}>회의록 없음</option>
+      <option value="no-analysis" ${S.filters.status === "no-analysis" ? "selected" : ""}>결과 정리 안 됨</option>
+      <option value="review" ${S.filters.status === "review" ? "selected" : ""}>확인 필요 있음</option></select>
+    <input type="search" id="f-q" placeholder="검색: 제목·안건·결정·회의록" value="${esc(S.filters.q)}" aria-label="검색">
+  </div>`;
+}
+function bindFilters(box) {
+  $("#f-type", box).onchange = (e) => { S.filters.type = e.target.value; render(); };
+  $("#f-status", box).onchange = (e) => { S.filters.status = e.target.value; render(); };
+  const q = $("#f-q", box); let t;
+  q.oninput = (e) => { clearTimeout(t); t = setTimeout(() => { S.filters.q = e.target.value; render(); setTimeout(() => { const n = $("#f-q"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 0); }, 300); };
+}
+function meetingCard(m) {
+  const rc = reviewCount(m);
+  return `<button class="mcard" data-open="${m.id}">
+    <div class="row" style="justify-content:space-between"><span class="t">${esc(m.analysis?.title ? cleanLine(m.analysis.title) : typeName(m.typeId))}</span><span class="muted small">${fmtDate(m.startedAt)} ${fmtTime(m.startedAt).slice(0, 5)}</span></div>
+    <div class="small muted">${esc(typeName(m.typeId))} · 녹음 ${hms(m.durationSec)}</div>
+    <div class="row small" style="margin-top:6px">회의록 ${statusBadge(txStatus(m))} 결과 ${statusBadge(anStatus(m))}
+      ${m.analysis ? `<span class="muted">안건 ${m.analysis.agendas.length} · 결정 ${m.analysis.agendas.filter((g) => norm(g.decision)).length} · 후속 조치 ${m.analysis.actions.filter((x) => !x.done).length}/${m.analysis.actions.length}</span>` : ""}
+      ${rc ? `<span class="badge review">확인 필요 ${rc}</span>` : ""}</div>
+  </button>`;
+}
+async function renderMeetings(box) {
+  const all = await loadMeetings(); const list = applyFilters(all);
+  box.innerHTML = `<section class="card"><h2>회의 기록</h2>${filterBar()}
+    ${!all.length ? `<div class="empty">아직 저장된 회의가 없습니다.<br><button class="btn primary" id="go-rec" style="margin-top:10px">녹음하러 가기</button></div>` :
+      !list.length ? `<div class="empty">조건에 맞는 회의가 없습니다.</div>` : `<div class="list">${list.map(meetingCard).join("")}</div>`}
+  </section>`;
+  bindFilters(box);
+  box.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { S.detailId = +b.dataset.open; S.detailTab = "result"; S.editing = false; S.highlight = null; render(); });
+  const g = $("#go-rec", box); if (g) g.onclick = () => { S.tab = "record"; render(); };
+}
+
+let audioUrl = null;
+async function renderDetail(box) {
+  let m;
+  try { m = await DB.get(S.detailId); } catch (e) { S.dbError = e.message; }
+  if (!m) { box.innerHTML = `<section class="card"><button class="back" id="bk">← 회의 목록</button><div class="alert err">회의를 찾을 수 없습니다. 삭제되었을 수 있습니다.</div></section>`; $("#bk", box).onclick = () => { S.detailId = null; render(); }; return; }
+  const blob = await DB.audio(m.id).catch(() => null);
+  if (audioUrl) URL.revokeObjectURL(audioUrl);
+  audioUrl = blob ? URL.createObjectURL(blob) : null;
+  const hasTx = !!(m.transcript && norm(m.transcript.text));
+  box.innerHTML = `
+  <button class="back" id="bk">← 회의 목록</button>
+  <section class="card">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">${esc(typeName(m.typeId))} · ${fmtDate(m.startedAt)}</h2><button class="btn danger small" id="del">삭제</button></div>
+    <dl class="meta" style="margin-top:10px">
+      <dt>시작·종료</dt><dd>${fmtTime(m.startedAt)} – ${fmtTime(m.endedAt)}</dd>
+      <dt>녹음 시간</dt><dd>${hms(m.durationSec)}</dd>
+      <dt>회의록</dt><dd>${statusBadge(txStatus(m))}</dd>
+      <dt>회의 결과</dt><dd>${statusBadge(anStatus(m))}</dd>
+    </dl>
+    <div id="del-ask"></div>
+  </section>
+  <section class="card"><h2>원본 음성</h2>
+    ${audioUrl ? `<audio controls preload="metadata" src="${audioUrl}" data-testid="player"></audio>
+      <div class="row small muted" style="margin-top:6px"><span>${esc(m.fileName)} · ${fmtSize(m.size)}</span><button class="btn small" id="dl-audio">내려받기</button></div>`
+      : `<div class="alert err">음성 파일을 이 브라우저에서 찾을 수 없습니다.</div>`}
+  </section>
+  <section class="card" id="result-card"></section>
+  <section class="card" id="tx-card"></section>
+  <section class="card"><h2>보고서 내려받기</h2>
+    <p class="small muted">구성: [회의 종류] 회의록 및 안건 보고서 → 기본 정보 표(회의 유형·일시·녹음 시간·작성일자) → 1. 핵심 요약 및 결정 사항 → 2. 향후 추진 과제 → 3. 회의 녹음 전문. ‘확인 필요’ 항목은 문서에도 [확인 필요]로 표시됩니다.</p>
+    ${hasTx ? "" : `<div class="alert warn">회의록을 먼저 입력해야 보고서를 만들 수 있습니다.</div>`}
+    <div class="row">
+      <button class="btn primary" id="ex-hwpx" ${hasTx ? "" : "disabled"}>한글 문서(HWPX) 내려받기</button>
+      <button class="btn" id="ex-print" ${hasTx ? "" : "disabled"}>인쇄 / PDF로 저장</button>
+      <button class="btn" id="ex-txt" ${hasTx ? "" : "disabled"}>회의록 텍스트(.txt)</button>
+    </div>
+    <p class="small" style="color:var(--warn)">HWPX는 시험 제공입니다. 한글 문서 표준(OWPML) 구조로 만들었지만 한컴오피스 한글에서 직접 열어 보는 확인은 하지 못했습니다. 열리지 않으면 ‘인쇄 / PDF로 저장’을 사용하세요.</p>
+  </section>`;
+  $("#bk", box).onclick = () => { S.detailId = null; S.editing = false; render(); };
+  $("#del", box).onclick = () => {
+    $("#del-ask", box).innerHTML = `<div class="alert warn">원본 음성·회의록·결과가 모두 지워지며 되돌릴 수 없습니다.<div class="row" style="margin-top:8px"><button class="btn danger" id="del-yes">삭제</button><button class="btn" id="del-no">취소</button></div></div>`;
+    $("#del-yes", box).onclick = async () => { await DB.remove(m.id); S.detailId = null; toast("회의를 삭제했습니다."); render(); };
+    $("#del-no", box).onclick = () => ($("#del-ask", box).innerHTML = "");
+  };
+  const dl = $("#dl-audio", box); if (dl) dl.onclick = () => downloadBlob(blob, m.fileName);
+  $("#ex-hwpx", box).onclick = () => exportHwpx(m);
+  $("#ex-print", box).onclick = () => printReport(m);
+  $("#ex-txt", box).onclick = () => downloadBlob(new Blob([cleanText(m.transcript.text)], { type: "text/plain;charset=utf-8" }), `${safeName(typeName(m.typeId))}_${stamp(m.startedAt)}_회의록.txt`);
+  renderTranscriptCard($("#tx-card", box), m);
+  renderResultCard($("#result-card", box), m);
+}
+
+function renderTranscriptCard(el, m) {
+  const t = m.transcript;
+  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">회의록</h2>
+      ${t ? `<span class="small muted">마지막 수정 ${fmtDate(t.editedAt)} ${fmtTime(t.editedAt)}</span>` : ""}</div>
+    <p class="small muted">자동 전사는 이 파일에서 제공하지 않습니다. 녹음을 들으며 직접 입력하거나, 다른 전사 도구의 결과를 붙여넣거나 .txt 파일로 불러오세요.</p>
+    <textarea id="tx-text" aria-label="회의록" placeholder="회의록을 입력하세요" style="min-height:200px">${esc(t?.text || "")}</textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="btn primary" id="tx-save">회의록 저장</button>
+      <label class="btn" style="cursor:pointer">.txt 불러오기<input type="file" id="tx-file" accept=".txt,text/plain" hidden></label>
+      <span class="small muted" id="tx-count"></span>
+    </div><div id="tx-msg"></div>`;
+  const ta = $("#tx-text", el), cnt = $("#tx-count", el);
+  const upd = () => (cnt.textContent = `${ta.value.length.toLocaleString()}자`); upd(); ta.oninput = upd;
+  $("#tx-save", el).onclick = async () => {
+    const text = cleanText(ta.value);
+    if (!norm(text)) { $("#tx-msg", el).innerHTML = `<div class="alert err">회의록이 비어 있습니다.</div>`; return; }
+    m.transcript = { text, editedAt: new Date().toISOString() };
+    try { await DB.put(m); toast("회의록을 저장했습니다."); render(); }
+    catch (e) { $("#tx-msg", el).innerHTML = `<div class="alert err">저장하지 못했습니다: ${esc(e.message || e)}</div>`; }
+  };
+  $("#tx-file", el).onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const msg = $("#tx-msg", el);
+    if (!/\.txt$/i.test(f.name)) { msg.innerHTML = `<div class="alert err">.txt 파일만 불러올 수 있습니다.</div>`; return; }
+    if (f.size > MAX_TXT_BYTES) { msg.innerHTML = `<div class="alert err">파일이 너무 큽니다(최대 2MB).</div>`; return; }
+    let text = await f.text();
+    if (text.includes("�")) { try { text = new TextDecoder("euc-kr").decode(await f.arrayBuffer()); } catch { } }
+    ta.value = cleanText(text); upd(); msg.innerHTML = `<div class="alert warn">불러왔습니다. 내용을 확인한 뒤 ‘회의록 저장’을 누르세요.</div>`;
+  };
+}
+
+/* ---- 회의 결과 ---- */
+function renderResultCard(el, m) {
+  const hasTx = !!(m.transcript && norm(m.transcript.text));
+  const a = m.analysis;
+  if (S.editing) return renderEditor(el, m);
+  const head = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">회의 결과</h2>
+    <button class="btn small" id="r-edit" ${hasTx ? "" : "disabled"}>${a ? "수정" : "결과 정리하기"}</button></div>`;
+  if (!hasTx) { el.innerHTML = head + `<div class="empty">회의록을 먼저 입력하세요. 결과는 회의록을 근거로 정리합니다.</div>`; return; }
+  const tabs = `<div class="sub-tabs" role="tablist"><button role="tab" data-st="result" aria-selected="${S.detailTab === "result"}">회의 결과</button><button role="tab" data-st="full" aria-selected="${S.detailTab === "full"}">전문 보기</button></div>`;
+  let body = "";
+  if (S.detailTab === "full") body = transcriptHtml(m);
+  else if (!a) body = `<div class="empty">아직 정리된 결과가 없습니다. ‘결과 정리하기’에서 회의록에 있는 안건·결정·후속 조치를 직접 정리하세요.<br><span class="small">근거 문장을 회의록에서 찾지 못한 항목은 ‘확인 필요’로 표시됩니다.</span></div>`;
+  else body = resultHtml(m);
+  el.innerHTML = head + tabs + body;
+  $("#r-edit", el).onclick = () => { S.editing = true; render(); };
+  el.querySelectorAll("[data-st]").forEach((b) => b.onclick = () => { S.detailTab = b.dataset.st; if (b.dataset.st === "result") S.highlight = null; renderResultCard(el, m); });
+  el.querySelectorAll("[data-ev]").forEach((b) => b.onclick = () => { S.highlight = b.dataset.ev; S.detailTab = "full"; renderResultCard(el, m); setTimeout(() => el.querySelector("mark")?.scrollIntoView({ block: "center" }), 0); });
+  el.querySelectorAll("[data-done]").forEach((c) => c.onchange = async () => { m.analysis.actions[+c.dataset.done].done = c.checked; await DB.put(m); renderResultCard(el, m); });
+  el.querySelectorAll("[data-confirm]").forEach((b) => b.onclick = async () => {
+    const [k, i] = b.dataset.confirm.split(":");
+    if (k === "agenda") m.analysis.agendas[+i].confirmed = true;
+    if (k === "decision") m.analysis.agendas[+i].decisionConfirmed = true;
+    if (k === "action") m.analysis.actions[+i].confirmed = true;
+    await DB.put(m); renderResultCard(el, m);
+  });
+}
+function transcriptHtml(m) {
+  const text = cleanText(m.transcript.text);
+  let html = esc(text);
+  if (S.highlight) {
+    const q = norm(S.highlight);
+    // 공백 차이를 허용해 찾는다
+    const pattern = q.split(" ").map((w) => esc(w).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
+    try { html = html.replace(new RegExp(pattern), (s) => `<mark>${s}</mark>`); } catch { }
+  }
+  return `${S.highlight ? `<p class="small muted">강조한 부분이 근거 문장입니다.</p>` : ""}<div class="transcript" data-testid="full-text">${html}</div>`;
+}
+function evHtml(m, quote) {
+  if (!norm(quote)) return "";
+  const found = inTranscript(m, quote);
+  return `<div class="quote">“${esc(cleanLine(quote))}”</div>${found ? `<button class="ev" data-ev="${esc(quote)}">근거 보기</button>` : ""}`;
+}
+function reviewHtml(m, kind, x, idx) {
+  const r = reviewOf(m, kind, x);
+  return r ? `<span class="badge review">확인 필요</span> <span class="reason">${esc(r)}</span> <button class="btn small" data-confirm="${kind}:${idx}">원문 확인했어요</button>` : "";
+}
+function resultHtml(m) {
+  const a = m.analysis, rc = reviewCount(m);
+  const decisions = a.agendas.map((g, i) => ({ g, i })).filter(({ g }) => norm(g.decision));
+  return `
+  <div class="summary">
+    <div class="small muted">${esc(typeName(m.typeId))} · ${fmtDate(m.startedAt)} ${fmtTime(m.startedAt).slice(0, 5)} · 녹음 ${hms(m.durationSec)}</div>
+    <div class="title" data-testid="r-title">${esc(cleanLine(a.title) || "제목 없음")}</div>
+    <div>${esc(cleanText(a.summary) || "요약 없음")}</div>
+    <div class="small muted">직접 작성 · ${fmtDate(a.updatedAt)} ${fmtTime(a.updatedAt).slice(0, 5)}</div>
+  </div>
+  ${isStale(m) ? `<div class="alert warn">결과를 정리한 뒤 회의록이 수정되었습니다. 결과가 현재 회의록과 맞는지 확인하세요.</div>` : ""}
+  ${rc ? `<div class="alert warn" data-testid="review-banner"><b>확인 필요 ${rc}건</b> — 근거 문장을 회의록에서 찾지 못했거나 담당·기한이 회의록에 나오지 않는 항목입니다. 원문과 비교한 뒤 ‘원문 확인했어요’를 누르세요.</div>` : ""}
+  <h3>중요 안건 ${a.agendas.length}</h3>
+  ${a.agendas.length ? a.agendas.map((g, i) => `<div class="agenda">
+     <div class="head"><span class="imp ${g.importance}">${IMPORTANCE[g.importance] || "보통"}</span>${esc(cleanLine(g.title))}
+       ${norm(g.decision) ? `<span class="badge ok">결정 있음</span>` : ""}</div>
+     ${norm(g.details) ? `<div style="margin-top:6px">${esc(cleanText(g.details))}</div>` : ""}
+     ${evHtml(m, g.evidence)} ${reviewHtml(m, "agenda", g, i)}
+     ${norm(g.decision) ? `<div class="decision"><div class="small muted">결정 사항</div><div>${esc(cleanText(g.decision))}</div>${evHtml(m, g.decisionEvidence)} ${reviewHtml(m, "decision", g, i)}</div>`
+       : `<div class="small muted" style="margin-top:6px">명시적으로 결정된 사항 없음</div>`}
+   </div>`).join("") : `<p class="muted">정리된 안건이 없습니다.</p>`}
+  <h3>결정 사항 ${decisions.length}</h3>
+  ${decisions.length ? `<ul>${decisions.map(({ g, i }) => `<li><b>${esc(cleanText(g.decision))}</b> <span class="small muted">· ${esc(cleanLine(g.title))}</span> ${reviewOf(m, "decision", g) ? `<span class="badge review">확인 필요</span>` : ""}</li>`).join("")}</ul>` : `<p class="muted">결정 사항이 없습니다.</p>`}
+  <h3>후속 조치 ${a.actions.filter((x) => x.done).length}/${a.actions.length}</h3>
+  ${a.actions.length ? a.actions.map((x, i) => `<div class="action ${x.done ? "done" : ""}">
+      <input type="checkbox" data-done="${i}" ${x.done ? "checked" : ""} aria-label="완료: ${esc(cleanLine(x.task))}">
+      <div><div class="task">${esc(cleanLine(x.task))}</div>
+        <div class="small">담당 ${norm(x.assignee) ? esc(cleanLine(x.assignee)) : `<span class="unassigned">${UNASSIGNED}</span>`} · 기한 ${norm(x.due) ? esc(cleanLine(x.due)) : `<span class="unassigned">${UNASSIGNED}</span>`}</div>
+        ${evHtml(m, x.evidence)} ${reviewHtml(m, "action", x, i)}</div></div>`).join("") : `<p class="muted">후속 조치가 없습니다.</p>`}`;
+}
+
+function blankAgenda() { return { title: "", importance: "medium", details: "", evidence: "", decision: "", decisionEvidence: "", confirmed: false, decisionConfirmed: false }; }
+function blankAction() { return { task: "", assignee: "", due: "", evidence: "", done: false, confirmed: false }; }
+function renderEditor(el, m) {
+  const a = m.analysis ? JSON.parse(JSON.stringify(m.analysis)) : { title: "", summary: "", agendas: [blankAgenda()], actions: [] };
+  const draw = () => {
+    el.innerHTML = `<h2>회의 결과 정리</h2>
+    <div class="alert warn small">회의록에 있는 내용만 적으세요. ‘근거 문장’에는 회의록의 문장을 그대로 붙여넣으면 자동으로 확인되고, 찾지 못하면 ‘확인 필요’로 표시됩니다. 담당·기한을 비워 두면 ‘미지정’으로 표시됩니다.</div>
+    <label class="f" for="e-title">회의 제목</label><input type="text" id="e-title" maxlength="100" value="${esc(a.title)}">
+    <label class="f" for="e-summary">핵심 요약</label><textarea id="e-summary" style="min-height:80px">${esc(a.summary)}</textarea>
+    <h3>중요 안건</h3>
+    ${a.agendas.map((g, i) => `<div class="edit-item" data-ag="${i}">
+      <div class="grid2"><div><label class="f">안건</label><input type="text" data-k="title" value="${esc(g.title)}" maxlength="120"></div>
+        <div><label class="f">중요도</label><select data-k="importance">${["high", "medium", "low"].map((v) => `<option value="${v}" ${g.importance === v ? "selected" : ""}>${IMPORTANCE[v]}</option>`).join("")}</select></div></div>
+      <label class="f">논의 내용</label><textarea data-k="details" style="min-height:60px">${esc(g.details)}</textarea>
+      <label class="f">근거 문장 (회의록에서 복사)</label><input type="text" data-k="evidence" value="${esc(g.evidence)}">
+      <label class="f">결정 사항 (없으면 비움)</label><input type="text" data-k="decision" value="${esc(g.decision)}">
+      <label class="f">결정 근거 문장</label><input type="text" data-k="decisionEvidence" value="${esc(g.decisionEvidence)}">
+      <button class="btn small danger" data-rm-ag="${i}" style="margin-top:8px">안건 삭제</button></div>`).join("")}
+    <button class="btn small" id="add-ag">+ 안건 추가</button>
+    <h3>후속 조치</h3>
+    ${a.actions.map((x, i) => `<div class="edit-item" data-ac="${i}">
+      <label class="f">할 일</label><input type="text" data-k="task" value="${esc(x.task)}" maxlength="200">
+      <div class="grid2"><div><label class="f">담당 (회의록에 없으면 비움)</label><input type="text" data-k="assignee" value="${esc(x.assignee)}"></div>
+        <div><label class="f">기한 (회의록에 없으면 비움)</label><input type="text" data-k="due" value="${esc(x.due)}"></div></div>
+      <label class="f">근거 문장</label><input type="text" data-k="evidence" value="${esc(x.evidence)}">
+      <button class="btn small danger" data-rm-ac="${i}" style="margin-top:8px">후속 조치 삭제</button></div>`).join("")}
+    <button class="btn small" id="add-ac">+ 후속 조치 추가</button>
+    <div id="e-msg"></div>
+    <div class="row" style="margin-top:16px"><button class="btn primary" id="e-save">결과 저장</button><button class="btn" id="e-cancel">취소</button></div>`;
+    const sync = () => {
+      a.title = $("#e-title", el).value; a.summary = $("#e-summary", el).value;
+      el.querySelectorAll("[data-ag]").forEach((d) => d.querySelectorAll("[data-k]").forEach((f) => (a.agendas[+d.dataset.ag][f.dataset.k] = f.value)));
+      el.querySelectorAll("[data-ac]").forEach((d) => d.querySelectorAll("[data-k]").forEach((f) => (a.actions[+d.dataset.ac][f.dataset.k] = f.value)));
+    };
+    $("#add-ag", el).onclick = () => { sync(); a.agendas.push(blankAgenda()); draw(); };
+    $("#add-ac", el).onclick = () => { sync(); a.actions.push(blankAction()); draw(); };
+    el.querySelectorAll("[data-rm-ag]").forEach((b) => b.onclick = () => { sync(); a.agendas.splice(+b.dataset.rmAg, 1); draw(); });
+    el.querySelectorAll("[data-rm-ac]").forEach((b) => b.onclick = () => { sync(); a.actions.splice(+b.dataset.rmAc, 1); draw(); });
+    $("#e-cancel", el).onclick = () => { S.editing = false; render(); };
+    $("#e-save", el).onclick = async () => {
+      sync();
+      const prev = m.analysis;
+      const clean = {
+        title: cleanLine(a.title), summary: cleanText(a.summary).trim(),
+        agendas: a.agendas.filter((g) => norm(g.title)).map((g) => ({ ...g, title: cleanLine(g.title), details: cleanText(g.details).trim(), evidence: cleanText(g.evidence).trim(), decision: cleanText(g.decision).trim(), decisionEvidence: cleanText(g.decisionEvidence).trim() })),
+        actions: a.actions.filter((x) => norm(x.task)).map((x) => ({ ...x, task: cleanLine(x.task), assignee: cleanLine(x.assignee), due: cleanLine(x.due), evidence: cleanText(x.evidence).trim() })),
+      };
+      if (!clean.title && !clean.summary && !clean.agendas.length && !clean.actions.length) { $("#e-msg", el).innerHTML = `<div class="alert err">저장할 내용이 없습니다.</div>`; return; }
+      // 근거·담당·기한이 바뀐 항목은 ‘확인했어요’를 다시 받는다
+      const same = (p, x, keys) => p && keys.every((k) => norm(p[k]) === norm(x[k]));
+      clean.agendas.forEach((g, i) => { const p = prev?.agendas[i]; g.confirmed = !!(p?.confirmed && same(p, g, ["title", "evidence"])); g.decisionConfirmed = !!(p?.decisionConfirmed && same(p, g, ["decision", "decisionEvidence"])); });
+      clean.actions.forEach((x, i) => { const p = prev?.actions[i]; x.confirmed = !!(p?.confirmed && same(p, x, ["task", "assignee", "due", "evidence"])); });
+      clean.updatedAt = new Date().toISOString(); clean.transcriptHash = hashText(m.transcript.text);
+      m.analysis = clean;
+      try { await DB.put(m); S.editing = false; S.detailTab = "result"; toast("회의 결과를 저장했습니다."); render(); }
+      catch (e) { $("#e-msg", el).innerHTML = `<div class="alert err">저장하지 못했습니다: ${esc(e.message || e)}</div>`; }
+    };
+  };
+  draw();
+}
+
+/* ---- 대시보드 ---- */
+async function renderDashboard(box) {
+  const all = await loadMeetings(); const list = applyFilters(all);
+  const open = []; list.forEach((m) => (m.analysis?.actions || []).forEach((x, i) => { if (!x.done) open.push({ m, x, i }); }));
+  const decisions = list.reduce((n, m) => n + (m.analysis?.agendas || []).filter((g) => norm(g.decision)).length, 0);
+  box.innerHTML = `
+  <div class="stats">
+    <div class="stat"><b data-testid="st-meetings">${list.length}</b><span>회의</span></div>
+    <div class="stat"><b>${list.filter((m) => m.analysis).length}</b><span>결과 정리됨</span></div>
+    <div class="stat"><b>${decisions}</b><span>결정 사항</span></div>
+    <div class="stat"><b>${open.length}</b><span>남은 후속 조치</span></div>
+  </div>
+  <section class="card"><h2>회의별 결과</h2>${filterBar()}
+    ${!all.length ? `<div class="empty">아직 저장된 회의가 없습니다. 녹음을 저장하고 회의록·결과를 정리하면 여기에 모입니다.</div>` :
+      !list.length ? `<div class="empty">조건에 맞는 회의가 없습니다.</div>` : `<div class="list">${list.map(meetingCard).join("")}</div>`}
+  </section>
+  <section class="card"><h2>남은 후속 조치</h2>
+    ${open.length ? open.map(({ m, x, i }) => `<div class="action"><input type="checkbox" data-od="${m.id}:${i}" aria-label="완료: ${esc(x.task)}">
+       <div><div class="task">${esc(cleanLine(x.task))}</div><div class="small">담당 ${norm(x.assignee) ? esc(x.assignee) : `<span class="unassigned">${UNASSIGNED}</span>`} · 기한 ${norm(x.due) ? esc(x.due) : `<span class="unassigned">${UNASSIGNED}</span>`}
+       · <button class="ev" data-open="${m.id}">${esc(typeName(m.typeId))} ${fmtDate(m.startedAt)}</button> ${reviewOf(m, "action", x) ? `<span class="badge review">확인 필요</span>` : ""}</div></div></div>`).join("")
+      : `<p class="muted">남은 후속 조치가 없습니다.</p>`}
+  </section>`;
+  bindFilters(box);
+  box.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { S.tab = "meetings"; S.detailId = +b.dataset.open; S.detailTab = "result"; S.editing = false; render(); });
+  box.querySelectorAll("[data-od]").forEach((c) => c.onchange = async () => { const [id, i] = c.dataset.od.split(":").map(Number); const m = await DB.get(id); m.analysis.actions[i].done = true; await DB.put(m); toast("완료로 표시했습니다."); render(); });
+}
+
+/* ---- 설정 ---- */
+function renderSettings(box) {
+  box.innerHTML = `
+  <section class="card"><h2>회의 종류 이름</h2><p class="small muted">번호(1~5)는 고정이고 이름만 바뀝니다.</p>
+    ${S.types.map((t) => `<form class="rename" data-rn="${t.id}"><b>${t.id}</b><input type="text" maxlength="40" value="${esc(t.name)}" aria-label="회의 종류 ${t.id} 이름"><button class="btn small">저장</button></form>`).join("")}
+  </section>
+  <section class="card"><h2>녹음·개인정보 안내</h2>${privacyHtml(true)}</section>
+  <section class="card"><h2>데이터</h2>
+    <p class="small">저장 위치: 이 브라우저(IndexedDB). 다른 PC·다른 브라우저와 공유되지 않으며, 브라우저의 사이트 데이터를 지우면 사라집니다. 중요한 녹음은 회의 상세에서 내려받아 따로 보관하세요.</p>
+    <div id="st-usage" class="small muted"></div>
+    <div id="clear-box" style="margin-top:10px"><button class="btn danger" id="clear">모든 데이터 지우기</button></div>
+  </section>`;
+  box.querySelectorAll("[data-rn]").forEach((f) => f.onsubmit = async (e) => {
+    e.preventDefault(); const id = +f.dataset.rn; const v = cleanLine(f.querySelector("input").value);
+    if (!v) { toast("이름을 입력하세요."); return; }
+    S.types = S.types.map((t) => (t.id === id ? { ...t, name: v } : t));
+    try { await DB.setSetting("types", S.types); toast("이름을 저장했습니다."); } catch (e2) { toast("저장하지 못했습니다: " + (e2.message || e2)); }
+  });
+  navigator.storage?.estimate?.().then((u) => { const el = $("#st-usage", box); if (el && u.usage != null) el.textContent = `사용 중 약 ${fmtSize(u.usage)}`; }).catch(() => { });
+  $("#clear", box).onclick = () => {
+    $("#clear-box", box).innerHTML = `<div class="alert warn">모든 회의의 원본 음성·회의록·결과가 지워지며 되돌릴 수 없습니다.<div class="row" style="margin-top:8px"><button class="btn danger" id="clear-yes">모두 지우기</button><button class="btn" id="clear-no">취소</button></div></div>`;
+    $("#clear-yes", box).onclick = async () => { await DB.clearAll(); toast("모든 데이터를 지웠습니다."); render(); };
+    $("#clear-no", box).onclick = () => render();
+  };
+}
+
+/* ---------------- 보고서 모델 (HWPX·인쇄 공통) ---------------- */
+function buildReport(m, now = new Date()) {
+  const name = cleanLine(typeName(m.typeId));
+  const s = new Date(m.startedAt), e = new Date(m.endedAt), a = m.analysis;
+  const info = [["회의 유형", name], ["일시", `${krDate(s)} ${fmtTime(m.startedAt)} – ${fmtTime(m.endedAt)}`], ["녹음 시간", hms(m.durationSec)],
+    ["작성일자", `${krDate(now)} ${pad(now.getHours())}:${pad(now.getMinutes())}`], ["회의록 작성", "직접 입력"]];
+  const r = { title: `[${name}] 회의록 및 안건 보고서`, info, hasAnalysis: !!a, summary: null, note: null, agendas: [], actions: [], lines: [], foot: [] };
+  if (a) {
+    if (a.title) info.splice(1, 0, ["회의 제목", cleanLine(a.title)]);
+    info.push(["요약 작성", "직접 작성"]);
+    r.summary = cleanText(a.summary).trim() || null;
+    if (isStale(m)) r.note = "결과를 정리한 뒤 회의록이 수정되었습니다. 아래 내용은 수정 전 회의록 기준일 수 있습니다.";
+    r.agendas = a.agendas.map((g) => ({ title: cleanLine(g.title), importance: IMPORTANCE[g.importance] || "보통", details: cleanText(g.details).trim() || null,
+      decision: cleanText(g.decision).trim() || null, agendaReview: reviewOf(m, "agenda", g), decisionReview: norm(g.decision) ? reviewOf(m, "decision", g) : null }));
+    r.actions = a.actions.map((x, i) => { const rv = reviewOf(m, "action", x); return { no: i + 1, task: cleanLine(x.task), assignee: cleanLine(x.assignee) || UNASSIGNED, due: cleanLine(x.due) || UNASSIGNED, status: x.done ? "완료" : "진행", note: rv ? `확인 필요: ${rv}` : "" }; });
+  }
+  r.lines = cleanText(m.transcript.text).split("\n").map((p) => p.trim()).filter(Boolean);
+  r.foot.push("담당·기한의 ‘미지정’은 회의록에서 확인할 수 없었다는 뜻입니다.");
+  if (r.agendas.some((g) => g.agendaReview || g.decisionReview) || r.actions.some((x) => x.note)) r.foot.push("[확인 필요] 표시는 근거 문장을 회의록에서 찾지 못했거나 담당·기한이 회의록에 나오지 않는 항목이므로 원문과 대조하세요.");
+  return r;
+}
+function plainText(r) {
+  const out = [r.title, ...r.info.map(([k, v]) => `${k}: ${v}`), "1. 핵심 요약 및 결정 사항"];
+  if (r.summary) out.push(r.summary);
+  r.agendas.forEach((g, i) => { out.push(`${i + 1}) ${g.title}`); if (g.decision) out.push(`결정: ${g.decision}`); });
+  out.push("2. 향후 추진 과제", ...r.actions.map((x) => `${x.no}. ${x.task} / ${x.assignee} / ${x.due}`), "3. 회의 녹음 전문", ...r.lines);
+  return out.join("\n");
+}
+
+function printReport(m) {
+  const r = buildReport(m);
+  const rv = (t) => (t ? ` <span class="rv">[확인 필요] ${esc(t)}</span>` : "");
+  $("#print-area").innerHTML = `<h1>${esc(r.title)}</h1>
+    <table>${r.info.map(([k, v]) => `<tr><th style="width:25%">${esc(k)}</th><td>${esc(v)}</td></tr>`).join("")}</table>
+    <h2>1. 핵심 요약 및 결정 사항</h2>
+    ${!r.hasAnalysis ? `<p>회의 결과가 정리되지 않았습니다. (안건·결정 사항을 임의로 작성하지 않았습니다.)</p>` : `
+      ${r.note ? `<p class="rv">※ ${esc(r.note)}</p>` : ""}<p><b>요약:</b> ${esc(r.summary || "요약 없음")}</p>
+      ${r.agendas.map((g, i) => `<p><b>${i + 1}) ${esc(g.title)}</b> (중요도 ${g.importance})${rv(g.agendaReview)}<br>논의: ${esc(g.details || "기록 없음")}<br>결정: ${g.decision ? esc(g.decision) + rv(g.decisionReview) : "명시적으로 결정된 사항 없음"}</p>`).join("") || "<p>정리된 안건이 없습니다.</p>"}`}
+    <h2>2. 향후 추진 과제</h2>
+    ${!r.hasAnalysis ? "<p>회의 결과가 정리되지 않았습니다.</p>" : r.actions.length ? `<table><tr><th>번호</th><th>과제</th><th>담당</th><th>기한</th><th>상태</th><th>비고</th></tr>${r.actions.map((x) => `<tr><td>${x.no}</td><td>${esc(x.task)}</td><td>${esc(x.assignee)}</td><td>${esc(x.due)}</td><td>${x.status}</td><td class="rv">${esc(x.note)}</td></tr>`).join("")}</table>` : "<p>추진 과제가 없습니다.</p>"}
+    <h2>3. 회의 녹음 전문</h2>${r.lines.map((l) => `<p>${esc(l)}</p>`).join("")}
+    <p style="color:#555;font-size:9pt">${esc(r.foot.join(" "))}</p>`;
+  window.print();
+}
+
+/* ---------------- HWPX (OWPML) 생성 ---------------- */
+const HX = (() => {
+  const NS = 'xmlns:ha="http://www.hancom.co.kr/hwpml/2011/app" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph" xmlns:hp10="http://www.hancom.co.kr/hwpml/2016/paragraph" xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hc="http://www.hancom.co.kr/hwpml/2011/core" xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head" xmlns:hhs="http://www.hancom.co.kr/hwpml/2011/history" xmlns:hm="http://www.hancom.co.kr/hwpml/2011/master-page" xmlns:hpf="http://www.hancom.co.kr/schema/2011/hpf" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf/" xmlns:ooxmlchart="http://www.hancom.co.kr/hwpml/2016/ooxmlchart" xmlns:hwpunitchar="http://www.hancom.co.kr/hwpml/2016/HwpUnitChar" xmlns:epub="http://www.idpf.org/2007/ops" xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"';
+  const DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>';
+  const LANGS = ["HANGUL", "LATIN", "HANJA", "JAPANESE", "OTHER", "SYMBOL", "USER"];
+  const PAGE_W = 59528, PAGE_H = 84186, MLR = 7087, MT = 5668, MB = 4252, TEXT_W = PAGE_W - 2 * MLR;
+  const X = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const XA = (s) => X(s).replace(/"/g, "&quot;");
+  const CH = { body: [0, 1050, "#000000", 0], title: [1, 1800, "#111827", 1], h1: [2, 1350, "#111827", 1], h2: [3, 1150, "#111827", 1], muted: [4, 950, "#6B7280", 0], review: [5, 950, "#B45309", 1], cell: [6, 1000, "#000000", 0], cellb: [7, 1000, "#111827", 1], label: [8, 1050, "#111827", 1] };
+  const PA = { body: [0, "JUSTIFY", 160, 0, 0, 400], title: [1, "CENTER", 150, 0, 0, 1400], h1: [2, "LEFT", 150, 0, 1800, 600], h2: [3, "LEFT", 150, 0, 900, 300], indent: [4, "JUSTIFY", 160, 1600, 0, 300], cell: [5, "LEFT", 130, 0, 0, 0], cellc: [6, "CENTER", 130, 0, 0, 0] };
+  const BF_NONE = 1, BF_CELL = 2, BF_HEAD = 3, BF_LABEL = 4;
+  const each = (v) => LANGS.map((l) => `${l.toLowerCase()}="${v}"`).join(" ");
+  const borderFill = (id, solid, fill) => {
+    const t = solid ? "SOLID" : "NONE";
+    const side = ["leftBorder", "rightBorder", "topBorder", "bottomBorder"].map((s) => `<hh:${s} type="${t}" width="0.12 mm" color="#000000"/>`).join("");
+    const brush = fill ? `<hc:fillBrush><hc:winBrush faceColor="${fill}" hatchColor="#999999" alpha="0"/></hc:fillBrush>` : "";
+    return `<hh:borderFill id="${id}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0"><hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/>${side}<hh:diagonal type="SOLID" width="0.1 mm" color="#000000"/>${brush}</hh:borderFill>`;
+  };
+  const charPr = ([id, h, color, bold]) => `<hh:charPr id="${id}" height="${h}" textColor="${color}" shadeColor="none" useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="${BF_NONE}"><hh:fontRef ${each(0)}/><hh:ratio ${each(100)}/><hh:spacing ${each(0)}/><hh:relSz ${each(100)}/><hh:offset ${each(0)}/>${bold ? "<hh:bold/>" : ""}<hh:underline type="NONE" shape="SOLID" color="#000000"/><hh:strikeout shape="NONE" color="#000000"/><hh:outline type="NONE"/><hh:shadow type="NONE" color="#B2B2B2" offsetX="10" offsetY="10"/></hh:charPr>`;
+  const paraPr = ([id, align, line, left, prev, next]) => `<hh:paraPr id="${id}" tabPrIDRef="0" condense="0" fontLineHeight="0" snapToGrid="1" suppressLineNumbers="0" checked="0"><hh:align horizontal="${align}" vertical="BASELINE"/><hh:heading type="NONE" idRef="0" level="0"/><hh:breakSetting breakLatinWord="KEEP_WORD" breakNonLatinWord="KEEP_WORD" widowOrphan="0" keepWithNext="0" keepLines="0" pageBreakBefore="0" lineWrap="BREAK"/><hh:margin><hc:intent value="0" unit="HWPUNIT"/><hc:left value="${left}" unit="HWPUNIT"/><hc:right value="0" unit="HWPUNIT"/><hc:prev value="${prev}" unit="HWPUNIT"/><hc:next value="${next}" unit="HWPUNIT"/></hh:margin><hh:lineSpacing type="PERCENT" value="${line}" unit="HWPUNIT"/><hh:border borderFillIDRef="${BF_NONE}" offsetLeft="0" offsetRight="0" offsetTop="0" offsetBottom="0" connect="0" ignoreMargin="0"/><hh:autoSpacing eAsianEng="0" eAsianNum="0"/></hh:paraPr>`;
+  function header() {
+    const fonts = LANGS.map((l) => `<hh:fontface lang="${l}" fontCnt="1"><hh:font id="0" face="맑은 고딕" type="TTF" isEmbedded="0"><hh:typeInfo familyType="FCAT_GOTHIC" weight="6" proportion="4" contrast="0" strokeVariation="1" armStyle="1" letterform="1" midline="1" xHeight="1"/></hh:font></hh:fontface>`).join("");
+    const fills = [borderFill(BF_NONE, false), borderFill(BF_CELL, true), borderFill(BF_HEAD, true, "#E5E7EB"), borderFill(BF_LABEL, true, "#F3F4F6")];
+    const chars = Object.values(CH).sort((a, b) => a[0] - b[0]), paras = Object.values(PA).sort((a, b) => a[0] - b[0]);
+    return `${DECL}<hh:head ${NS} version="1.4" secCnt="1"><hh:beginNum page="1" footnote="1" endnote="1" pic="1" tbl="1" equation="1"/><hh:refList><hh:fontfaces itemCnt="${LANGS.length}">${fonts}</hh:fontfaces><hh:borderFills itemCnt="${fills.length}">${fills.join("")}</hh:borderFills><hh:charProperties itemCnt="${chars.length}">${chars.map(charPr).join("")}</hh:charProperties><hh:tabProperties itemCnt="1"><hh:tabPr id="0" autoTabLeft="0" autoTabRight="0"/></hh:tabProperties><hh:paraProperties itemCnt="${paras.length}">${paras.map(paraPr).join("")}</hh:paraProperties><hh:styles itemCnt="1"><hh:style id="0" type="PARA" name="바탕글" engName="Normal" paraPrIDRef="0" charPrIDRef="0" nextStyleIDRef="0" langID="1042" lockForm="0"/></hh:styles></hh:refList><hh:compatibleDocument targetProgram="HWP201X"><hh:layoutCompatibility/></hh:compatibleDocument><hh:docOption><hh:linkinfo path="" pageInherit="0" footnoteInherit="0"/></hh:docOption><hh:trackchageConfig flags="56"/></hh:head>`;
+  }
+  function section(r) {
+    const parts = []; let pid = 0, tid = 0;
+    const run = (t, c) => `<hp:run charPrIDRef="${CH[c][0]}"><hp:t>${X(cleanText(t))}</hp:t></hp:run>`;
+    const P = (inner, pa) => `<hp:p id="${++pid}" paraPrIDRef="${PA[pa][0]}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">${inner}</hp:p>`;
+    const para = (runs, pa = "body") => parts.push(P(runs.filter(([t]) => t).map(([t, c]) => run(t, c)).join("") || `<hp:run charPrIDRef="0"/>`, pa));
+    const table = (rows, widths) => {
+      tid++; const rh = 1500;
+      const trs = rows.map((row, ri) => `<hp:tr>${row.map(([text, kind, bf], ci) => `<hp:tc name="" header="${bf === BF_HEAD ? 1 : 0}" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${bf}"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">${P(run(text || " ", kind), kind === "cellb" ? "cellc" : "cell")}</hp:subList><hp:cellAddr colAddr="${ci}" rowAddr="${ri}"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${widths[ci]}" height="${rh}"/><hp:cellMargin left="510" right="510" top="141" bottom="141"/></hp:tc>`).join("")}</hp:tr>`).join("");
+      const sum = widths.reduce((a, b) => a + b, 0);
+      const tbl = `<hp:tbl id="${1000 + tid}" zOrder="${tid}" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1" rowCnt="${rows.length}" colCnt="${widths.length}" cellSpacing="0" borderFillIDRef="${BF_CELL}" noAdjust="0"><hp:sz width="${sum}" widthRelTo="ABSOLUTE" height="${rh * rows.length}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:inMargin left="510" right="510" top="141" bottom="141"/>${trs}</hp:tbl>`;
+      parts.push(P(`<hp:run charPrIDRef="0">${tbl}<hp:t/></hp:run>`, "body"));
+    };
+    para([[r.title, "title"]], "title");
+    table(r.info.map(([k, v]) => [[k, "label", BF_LABEL], [v, "cell", BF_CELL]]), [9000, TEXT_W - 9000]);
+    para([["1. 핵심 요약 및 결정 사항", "h1"]], "h1");
+    if (!r.hasAnalysis) para([["회의 결과가 정리되지 않았습니다. (안건·결정 사항을 임의로 작성하지 않았습니다.)", "muted"]]);
+    else {
+      if (r.note) para([["※ " + r.note, "review"]]);
+      para([["요약: ", "label"], [r.summary || "요약 없음", "body"]]);
+      if (!r.agendas.length) para([["정리된 안건이 없습니다.", "muted"]]);
+      r.agendas.forEach((g, i) => {
+        para([[`${i + 1}) ${g.title}`, "h2"], [`  (중요도 ${g.importance})`, "muted"]], "h2");
+        if (g.agendaReview) para([[`[확인 필요] ${g.agendaReview}`, "review"]], "indent");
+        para([["논의: ", "label"], [g.details || "기록 없음", "body"]], "indent");
+        if (g.decision) para([["결정: ", "label"], [g.decision, "body"], ...(g.decisionReview ? [[` [확인 필요] ${g.decisionReview}`, "review"]] : [])], "indent");
+        else para([["결정: ", "label"], ["명시적으로 결정된 사항 없음", "muted"]], "indent");
+      });
+    }
+    para([["2. 향후 추진 과제", "h1"]], "h1");
+    if (!r.hasAnalysis) para([["회의 결과가 정리되지 않았습니다.", "muted"]]);
+    else if (!r.actions.length) para([["추진 과제가 없습니다.", "muted"]]);
+    else {
+      const w = [2800, 15000, 7800, 7200, 3800]; w.push(TEXT_W - w.reduce((a, b) => a + b, 0));
+      table([["번호", "과제", "담당", "기한", "상태", "비고"].map((h) => [h, "cellb", BF_HEAD]),
+        ...r.actions.map((x) => [[String(x.no), "cell", BF_CELL], [x.task, "cell", BF_CELL], [x.assignee, x.assignee === UNASSIGNED ? "muted" : "cell", BF_CELL],
+          [x.due, x.due === UNASSIGNED ? "muted" : "cell", BF_CELL], [x.status, "cell", BF_CELL], [x.note, x.note ? "review" : "cell", BF_CELL]])], w);
+    }
+    para([["3. 회의 녹음 전문", "h1"]], "h1");
+    r.lines.forEach((l) => para([[l, "body"]]));
+    para([[r.foot.join(" "), "muted"]]);
+    const secPr = `<hp:run charPrIDRef="0"><hp:secPr id="" textDirection="HORIZONTAL" spaceColumns="1134" tabStop="8000" tabStopVal="4000" tabStopUnit="HWPUNIT" outlineShapeIDRef="0" memoShapeIDRef="0" textVerticalWidthHead="0" masterPageCnt="0"><hp:grid lineGrid="0" charGrid="0" wonggojiFormat="0"/><hp:startNum pageStartsOn="BOTH" page="0" pic="0" tbl="0" equation="0"/><hp:visibility hideFirstHeader="0" hideFirstFooter="0" hideFirstMasterPage="0" border="SHOW_ALL" fill="SHOW_ALL" hideFirstPageNum="0" hideFirstEmptyLine="0" showLineNumber="0"/><hp:lineNumberShape restartType="0" countBy="0" distance="0" startNumber="0"/><hp:pagePr landscape="WIDELY" width="${PAGE_W}" height="${PAGE_H}" gutterType="LEFT_ONLY"><hp:margin header="4252" footer="4252" gutter="0" left="${MLR}" right="${MLR}" top="${MT}" bottom="${MB}"/></hp:pagePr><hp:footNotePr><hp:autoNumFormat type="DIGIT" userChar="" prefixChar="" suffixChar=")" supscript="0"/><hp:noteLine length="-1" type="SOLID" width="0.12 mm" color="#000000"/><hp:noteSpacing betweenNotes="283" belowLine="567" aboveLine="850"/><hp:numbering type="CONTINUOUS" newNum="1"/><hp:placement place="EACH_COLUMN" beneathText="0"/></hp:footNotePr><hp:endNotePr><hp:autoNumFormat type="DIGIT" userChar="" prefixChar="" suffixChar=")" supscript="0"/><hp:noteLine length="14692344" type="SOLID" width="0.12 mm" color="#000000"/><hp:noteSpacing betweenNotes="0" belowLine="567" aboveLine="850"/><hp:numbering type="CONTINUOUS" newNum="1"/><hp:placement place="END_OF_DOCUMENT" beneathText="0"/></hp:endNotePr>${["BOTH", "EVEN", "ODD"].map((t) => `<hp:pageBorderFill type="${t}" borderFillIDRef="${BF_NONE}" textBorder="PAPER" headerInside="0" footerInside="0" fillArea="PAPER"><hp:offset left="1417" right="1417" top="1417" bottom="1417"/></hp:pageBorderFill>`).join("")}</hp:secPr><hp:ctrl><hp:colPr id="" type="NEWSPAPER" layout="LEFT" colCount="1" sameSz="1" sameGap="0"/></hp:ctrl></hp:run>`;
+    const i = parts[0].indexOf(">") + 1; parts[0] = parts[0].slice(0, i) + secPr + parts[0].slice(i);
+    return `${DECL}<hs:sec ${NS}>${parts.join("")}</hs:sec>`;
+  }
+  function files(r) {
+    const hpf = `${DECL}<opf:package ${NS} version="" unique-identifier="" id=""><opf:metadata><opf:title>${X(r.title)}</opf:title><opf:language>ko</opf:language><opf:meta name="creator" content="text">회의록 분석</opf:meta></opf:metadata><opf:manifest><opf:item id="header" href="Contents/header.xml" media-type="application/xml"/><opf:item id="section0" href="Contents/section0.xml" media-type="application/xml"/><opf:item id="settings" href="settings.xml" media-type="application/xml"/></opf:manifest><opf:spine><opf:itemref idref="header" linear="yes"/><opf:itemref idref="section0" linear="yes"/></opf:spine></opf:package>`;
+    const version = `${DECL}<hv:HCFVersion xmlns:hv="http://www.hancom.co.kr/hwpml/2011/version" tagetApplication="WORDPROCESSOR" major="5" minor="1" micro="0" buildNumber="1" os="1" xmlVersion="1.4" application="Hancom Office Hangul" appVersion="11, 0, 0, 0"/>`;
+    const container = `${DECL}<ocf:container xmlns:ocf="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:hpf="http://www.hancom.co.kr/schema/2011/hpf"><ocf:rootfiles><ocf:rootfile full-path="Contents/content.hpf" media-type="application/hwpml-package+xml"/><ocf:rootfile full-path="Preview/PrvText.txt" media-type="text/plain"/></ocf:rootfiles></ocf:container>`;
+    const manifest = `${DECL}<odf:manifest xmlns:odf="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"/>`;
+    const settings = `${DECL}<ha:HWPApplicationSetting xmlns:ha="http://www.hancom.co.kr/hwpml/2011/app" xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><ha:CaretPosition listIDRef="0" paraIDRef="0" pos="0"/></ha:HWPApplicationSetting>`;
+    return [["mimetype", "application/hwp+zip"], ["version.xml", version], ["META-INF/container.xml", container], ["META-INF/manifest.xml", manifest],
+      ["Contents/content.hpf", hpf], ["Contents/header.xml", header()], ["Contents/section0.xml", section(r)], ["settings.xml", settings],
+      ["Preview/PrvText.txt", Array.from(cleanText(plainText(r))).slice(0, 1024).join("")]];
+  }
+  // 압축 없는(STORED) ZIP — mimetype을 첫 항목으로
+  const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  const crc32 = (b) => { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  function zip(entries) {
+    const enc = new TextEncoder(), d = new Date();
+    const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    const chunks = [], central = []; let off = 0;
+    for (const [name, text] of entries) {
+      const nb = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0, true); h.setUint16(8, 0, true);
+      h.setUint16(10, dosTime, true); h.setUint16(12, dosDate, true); h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true);
+      h.setUint16(26, nb.length, true); h.setUint16(28, 0, true);
+      chunks.push(new Uint8Array(h.buffer), nb, data);
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0, true); c.setUint16(10, 0, true);
+      c.setUint16(12, dosTime, true); c.setUint16(14, dosDate, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true);
+      c.setUint16(28, nb.length, true); c.setUint32(42, off, true);
+      central.push(new Uint8Array(c.buffer), nb);
+      off += 30 + nb.length + data.length;
+    }
+    const cdSize = central.reduce((n, b) => n + b.length, 0);
+    const e = new DataView(new ArrayBuffer(22));
+    e.setUint32(0, 0x06054b50, true); e.setUint16(8, entries.length, true); e.setUint16(10, entries.length, true); e.setUint32(12, cdSize, true); e.setUint32(16, off, true);
+    return new Blob([...chunks, ...central, new Uint8Array(e.buffer)], { type: "application/hwp+zip" });
+  }
+  // 내보내기 전 자체 점검: 모든 XML이 올바른지 브라우저 파서로 확인
+  function check(entries) {
+    const p = new DOMParser();
+    for (const [name, text] of entries) {
+      if (!/\.(xml|hpf)$/.test(name)) continue;
+      const doc = p.parseFromString(text, "application/xml");
+      if (doc.getElementsByTagName("parsererror").length) throw new Error(`${name} XML 형식 오류`);
+    }
+  }
+  return { build(r) { const e = files(r); check(e); return zip(e); } };
+})();
+
+function exportHwpx(m) {
+  try {
+    const blob = HX.build(buildReport(m));
+    downloadBlob(blob, `${safeName(typeName(m.typeId))}_${stamp(m.startedAt)}_회의록.hwpx`);
+    toast("HWPX 보고서를 내려받았습니다.");
+  } catch (e) { toast("HWPX를 만들지 못했습니다: " + (e.message || e)); }
+}
+
+/* ---------------- 시작 ---------------- */
+document.querySelectorAll("nav.tabs button").forEach((b) => b.onclick = () => {
+  S.tab = b.dataset.tab; S.detailId = null; S.editing = false; S.highlight = null;
+  if (R.state === "saved" || R.state === "error") { R.state = "idle"; R.error = null; }
+  render();
+});
+(async () => {
+  try {
+    await DB.open();
+    const saved = await DB.getSetting("types");
+    if (Array.isArray(saved) && saved.length === 5) S.types = saved.map((t, i) => ({ id: i + 1, name: cleanLine(t.name) || `회의 종류 ${i + 1}` }));
+  } catch (e) { S.dbError = e?.message || String(e); }
+  render();
+})();
+</script>
+</body>
+</html>
