@@ -116,6 +116,16 @@ details.privacy summary{cursor:pointer;font-weight:600}
 .stt-run{padding:10px 0;font-weight:600}
 .spk-box{border:1px solid var(--line);border-radius:12px;padding:4px 14px 10px;margin:12px 0}
 .spk-box .rename{grid-template-columns:48px minmax(0,auto) minmax(0,1fr)}
+.txt-view{background:var(--field);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0;max-height:520px;overflow:auto;line-height:1.75;font-size:15px}
+.txt-headlines{color:var(--muted);font-size:13px;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:8px}
+.tl{padding:2px 0}
+.ts{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.spk{display:inline-block;font-weight:700;border-radius:6px;padding:0 6px;font-size:13px}
+.spk.c0{background:#dbeafe;color:#1e40af}.spk.c1{background:#fde2e2;color:#9b1c1c}.spk.c2{background:#dcfce7;color:#166534}
+.spk.c3{background:#fef3c7;color:#92400e}.spk.c4{background:#ede9fe;color:#5b21b6}.spk.c5{background:#e0f2fe;color:#075985}
+details.sec{border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:12px 0}
+details.sec>summary{cursor:pointer;font-weight:700}
+details.sec .stt-box{margin-bottom:0}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:30;max-width:90vw}
 #print-area{display:none}
 @media print{body>*:not(#print-area){display:none!important}#print-area{display:block!important;color:#000;font-size:11pt}#print-area table{border-collapse:collapse;width:100%}#print-area td,#print-area th{border:1px solid #444;padding:4px 6px;text-align:left}#print-area h1{text-align:center;font-size:18pt}#print-area h2{font-size:13pt;margin-top:18pt}.rv{color:#a15c00}}
@@ -123,7 +133,7 @@ details.privacy summary{cursor:pointer;font-weight:600}
 </head>
 <body>
 <header class="top"><div class="top-in">
-  <div class="brand">회의록 분석 <span class="badge">v2</span></div>
+  <div class="brand">회의록 분석 <span class="badge">v2.1</span></div>
   <nav class="tabs" aria-label="화면">
     <button data-tab="record" aria-current="page">녹음</button>
     <button data-tab="meetings">회의 기록</button>
@@ -572,8 +582,8 @@ async function renderDetail(box) {
       <div class="row small muted" style="margin-top:6px"><span>${esc(m.fileName)} · ${fmtSize(m.size)}</span><button class="btn small" id="dl-audio">내려받기</button></div>`
       : `<div class="alert err">음성 파일을 이 브라우저에서 찾을 수 없습니다.</div>`}
   </section>
-  <section class="card" id="result-card"></section>
   <section class="card" id="tx-card"></section>
+  <section class="card" id="result-card"></section>
   <section class="card"><h2>보고서 내려받기</h2>
     <p class="small muted">구성: [회의 종류] 회의록 및 안건 보고서 → 기본 정보 표(회의 유형·일시·녹음 시간·작성일자) → 1. 핵심 요약 및 결정 사항 → 2. 향후 추진 과제 → 3. 회의 녹음 전문. ‘확인 필요’ 항목은 문서에도 [확인 필요]로 표시됩니다.</p>
     ${hasTx ? "" : `<div class="alert warn">회의록을 먼저 입력해야 보고서를 만들 수 있습니다.</div>`}
@@ -602,13 +612,18 @@ async function renderDetail(box) {
    - 음성 인식: Whisper (Transformers.js, ONNX) — 한국어
    - 화자 구분: WavLM 화자 임베딩(x-vector) → 구간별 목소리 특징을 비교해 묶음(군집화)
    - 음성은 외부로 보내지 않는다. 처음 한 번 모델 파일만 인터넷(Hugging Face)에서 내려받는다.
-   - 결과는 자동 인식이므로 ‘자동 전사’로 표시하고, 사용자가 녹음과 대조해 고칠 수 있게 한다. */
+   v2.1 수정
+   - 무음 판단 기준을 고정값(-44dBFS)에서 녹음마다 잡음 수준에 맞춘 값으로 바꿈 → 작게 녹음된 말소리가 버려지던 문제
+   - 인식 전에 음량을 맞춤(작은 녹음 키움)
+   - Whisper 인코더를 8비트 압축하지 않음(fp32) → 압축으로 인한 엉뚱한 받아쓰기·반복
+   - 그래픽 가속에서 fp16 인코더 사용 안 함(일부 그래픽카드에서 "!!!!" 같은 깨진 출력) + 깨진 출력이면 CPU로 자동 재시도
+   - 진단 정보(음량, 건너뛴 구간, 걸러낸 문장 수, 장치·정밀도)를 함께 저장 */
 const STT = {
   LIB: "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1",
   MODELS: {
     base: { id: "onnx-community/whisper-base", label: "빠름 (whisper-base) — 정확도 낮음" },
     small: { id: "onnx-community/whisper-small", label: "권장 (whisper-small)" },
-    turbo: { id: "onnx-community/whisper-large-v3-turbo", label: "정확 (whisper-large-v3-turbo) — 내려받기 큼, 그래픽 가속 PC 권장" },
+    turbo: { id: "onnx-community/whisper-large-v3-turbo", label: "가장 정확 (whisper-large-v3-turbo) — 1GB 이상, 그래픽 가속 PC 권장" },
   },
   SPK_MODEL: "Xenova/wavlm-base-plus-sv",
   SR: 16000,
@@ -625,22 +640,24 @@ const STT = {
     const cb = (p) => {
       if (p && p.file && p.total) { files[p.file] = [p.loaded || 0, p.total]; }
       const v = Object.values(files); if (!v.length) return;
-      const L = v.reduce((a, [l]) => a + l, 0), Tt = v.reduce((a, [, t]) => a + t, 0);
-      onProgress({ phase: "download", loaded: L, total: Tt });
+      onProgress({ phase: "download", loaded: v.reduce((a, [l]) => a + l, 0), total: v.reduce((a, [, t]) => a + t, 0) });
+    };
+    const model = STT.MODELS[opt.model].id, big = opt.model === "turbo";
+    const fetchErr = (e) => new Error(`음성 인식 모델(${model})을 불러오지 못했습니다: ${e.message || e}. 인터넷 연결을 확인하거나(huggingface.co 접속 필요) 다른 정확도 모델을 골라 보세요.`);
+    const makeAsr = async (device) => {
+      // 인코더는 압축하지 않는다(Whisper는 인코더 압축에 매우 민감). 큰 모델만 메모리 때문에 예외.
+      const dtype = device === "webgpu"
+        ? { encoder_model: big ? "fp16" : "fp32", decoder_model_merged: big ? "q4" : "fp32" }
+        : { encoder_model: big ? "q8" : "fp32", decoder_model_merged: "q8" };
+      const pipe = await T.pipeline("automatic-speech-recognition", model, { device, dtype, progress_callback: cb });
+      return { pipe, device, dtype };
     };
     let adapter = null;
     if (opt.gpu && navigator.gpu) { try { adapter = await navigator.gpu.requestAdapter(); } catch { adapter = null; } }
-    const model = STT.MODELS[opt.model].id;
-    let asr, device = "wasm";
-    const fetchErr = (e) => new Error(`음성 인식 모델(${model})을 불러오지 못했습니다: ${e.message || e}. 인터넷 연결을 확인하거나(huggingface.co 접속 필요) 다른 정확도 모델을 골라 보세요.`);
-    if (adapter) {
-      try {
-        const f16 = adapter.features && adapter.features.has("shader-f16");
-        asr = await T.pipeline("automatic-speech-recognition", model, { device: "webgpu", dtype: { encoder_model: f16 ? "fp16" : "fp32", decoder_model_merged: "q4" }, progress_callback: cb });
-        device = "webgpu";
-      } catch { asr = null; }
-    }
-    if (!asr) { try { asr = await T.pipeline("automatic-speech-recognition", model, { dtype: "q8", progress_callback: cb }); } catch (e) { throw fetchErr(e); } }
+    if (big && adapter && !(adapter.features && adapter.features.has("shader-f16"))) adapter = null; // fp16 미지원 그래픽은 CPU로
+    let asr = null;
+    if (adapter) { try { asr = await makeAsr("webgpu"); } catch { asr = null; } }
+    if (!asr) { try { asr = await makeAsr("wasm"); } catch (e) { throw fetchErr(e); } }
     let proc = null, spk = null;
     if (opt.speakers !== 1) {
       try {
@@ -648,12 +665,21 @@ const STT = {
         spk = await T.AutoModel.from_pretrained(STT.SPK_MODEL, { progress_callback: cb });
       } catch (e) { throw new Error(`화자 구분 모델을 불러오지 못했습니다: ${e.message || e}. ‘참석자 1명(화자 구분 안 함)’으로 다시 시도할 수 있습니다.`); }
     }
-    return {
-      device, model,
+    const eng = {
+      get device() { return asr.device; }, model,
+      get dtype() { return asr.dtype; },
       async asr(audio) {
-        const out = await asr(audio, { language: "korean", task: "transcribe", return_timestamps: true });
-        const chunks = out.chunks && out.chunks.length ? out.chunks : [{ timestamp: [0, audio.length / STT.SR], text: out.text || "" }];
-        return chunks.map((c) => ({ start: c.timestamp?.[0] ?? 0, end: c.timestamp?.[1] ?? audio.length / STT.SR, text: c.text || "" }));
+        const run = async () => {
+          const out = await asr.pipe(audio, { language: "korean", task: "transcribe", return_timestamps: true });
+          const chunks = out.chunks && out.chunks.length ? out.chunks : [{ timestamp: [0, audio.length / STT.SR], text: out.text || "" }];
+          return chunks.map((c) => ({ start: c.timestamp?.[0] ?? 0, end: c.timestamp?.[1] ?? audio.length / STT.SR, text: c.text || "" }));
+        };
+        let r = await run();
+        // 그래픽 가속에서 깨진 출력이면 CPU로 바꿔 다시 인식
+        if (asr.device === "webgpu" && STT.looksBroken(r.map((c) => c.text).join(" "))) {
+          asr = await makeAsr("wasm"); eng.fellBack = true; r = await run();
+        }
+        return r;
       },
       async embed(clip) {
         const inputs = await proc(clip);
@@ -661,9 +687,18 @@ const STT = {
         return Float32Array.from(embeddings.data);
       },
     };
+    return eng;
+  },
+  /* "!!!!!!", 같은 글자 무한 반복 등 깨진 출력 */
+  looksBroken(text) {
+    const t = (text || "").replace(/\s/g, "");
+    if (t.length < 8) return false;
+    const sym = (t.match(/[!?.,~\-_*#]/g) || []).length / t.length;
+    const top = Math.max(...Object.values([...t].reduce((m, c) => ((m[c] = (m[c] || 0) + 1), m), {}))) / t.length;
+    return sym > 0.6 || top > 0.6;
   },
 
-  /* 녹음 파일 → 16kHz 모노 */
+  /* 녹음 파일 → 16kHz 모노 (여러 채널이면 평균) */
   async decode(blob) {
     const buf = await blob.arrayBuffer();
     const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
@@ -671,25 +706,39 @@ const STT = {
     let ab;
     try { ab = await new Ctx(1, 1, STT.SR).decodeAudioData(buf); }
     catch (e) { throw new Error("녹음 파일을 해독하지 못했습니다(파일 손상 또는 지원하지 않는 형식). Chrome·Edge 최신 버전에서 시도하세요."); }
-    if (ab.sampleRate === STT.SR && ab.numberOfChannels === 1) return ab.getChannelData(0).slice();
-    // 다른 표본율로 해독된 경우 다시 맞춘다
-    const off = new Ctx(1, Math.ceil(ab.duration * STT.SR), STT.SR);
-    const src = off.createBufferSource(); src.buffer = ab; src.connect(off.destination); src.start();
-    return (await off.startRendering()).getChannelData(0).slice();
+    if (ab.sampleRate !== STT.SR || ab.numberOfChannels !== 1) {
+      const off = new Ctx(1, Math.ceil(ab.duration * STT.SR), STT.SR); // 채널은 자동으로 섞인다
+      const src = off.createBufferSource(); src.buffer = ab; src.connect(off.destination); src.start();
+      ab = await off.startRendering();
+    }
+    return ab.getChannelData(0).slice();
   },
 
-  /* 20ms 단위 소리 크기 */
   frameRms(x, sr = STT.SR, frameSec = 0.02) {
     const n = Math.max(1, Math.round(sr * frameSec)), out = new Float32Array(Math.ceil(x.length / n));
     for (let f = 0; f < out.length; f++) { let s = 0; const a = f * n, b = Math.min(x.length, a + n); for (let i = a; i < b; i++) s += x[i] * x[i]; out[f] = Math.sqrt(s / Math.max(1, b - a)); }
     return out;
   },
-  SPEECH_RMS: 0.006, // 약 -44 dBFS
-  speechFraction(rms, a, b) { // a,b: 프레임 번호
-    a = Math.max(0, a); b = Math.min(rms.length, b); if (b <= a) return 0;
-    let c = 0; for (let i = a; i < b; i++) if (rms[i] > STT.SPEECH_RMS) c++; return c / (b - a);
+  pct(arr, q) { const a = Array.from(arr).sort((x, y) => x - y); return a.length ? a[Math.min(a.length - 1, Math.floor(q * a.length))] : 0; },
+  /* 녹음마다 무음 기준을 정한다: 잡음 바닥(하위 10%)의 2.5배, 단 큰 소리(상위 5%)의 30%를 넘지 않게 */
+  levels(rms) {
+    const nz = Array.from(rms).filter((v) => v > 1e-6);
+    const noise = STT.pct(nz, 0.10), loud = STT.pct(nz, 0.95);
+    let thr = Math.min(Math.max(noise * 2.5, 0.0003), 0.006);
+    if (thr > loud * 0.3) thr = Math.max(loud * 0.3, 0.0001);
+    const db = (v) => (v > 0 ? Math.round(20 * Math.log10(v)) : -120);
+    return { noise, loud, thr, noiseDb: db(noise), loudDb: db(loud), thrDb: db(thr) };
   },
-  /* Whisper가 한 번에 처리하는 30초 이하로 자르되, 끝부분의 가장 조용한 곳에서 자른다 */
+  /* 작은 녹음은 키운다(큰 소리 구간 기준 약 -20dBFS, 최대 30배), 넘치는 값은 자른다 */
+  normalize(x, loud) {
+    const g = loud > 0 ? Math.min(30, Math.max(1, 0.1 / loud)) : 1;
+    if (g > 1.05) for (let i = 0; i < x.length; i++) { const v = x[i] * g; x[i] = v > 1 ? 1 : v < -1 ? -1 : v; }
+    return g;
+  },
+  speechFraction(rms, a, b, thr = 0.006) {
+    a = Math.max(0, a); b = Math.min(rms.length, b); if (b <= a) return 0;
+    let c = 0; for (let i = a; i < b; i++) if (rms[i] > thr) c++; return c / (b - a);
+  },
   splitWindows(len, rms, sr = STT.SR, maxSec = 28, searchSec = 6, frameSec = 0.02) {
     const out = [], fps = 1 / frameSec, maxS = Math.round(maxSec * sr);
     let s = 0;
@@ -705,20 +754,26 @@ const STT = {
     }
     return out;
   },
-  /* 무음 구간의 인식(환각)·같은 문장 반복을 걸러낸다 */
-  cleanSegments(segs, rms, frameSec = 0.02) {
+  /* 한 문장 안의 같은 말 반복(“네 네 네 네 …”, 같은 구절 4번 이상)을 줄인다 */
+  squeezeRepeats(text) {
+    let t = text.replace(/(\S+)(?:\s+\1){3,}/g, "$1 $1");
+    t = t.replace(/(.{2,30}?)(?:\s*\1){3,}/g, "$1");
+    return t;
+  },
+  /* 무음 구간의 인식(환각)·같은 문장 반복을 걸러낸다. 걸러낸 수는 진단에 남긴다 */
+  cleanSegments(segs, rms, thr, stats = {}, frameSec = 0.02) {
     const out = [];
+    stats.droppedSilent = 0; stats.droppedRepeat = 0; stats.droppedEmpty = 0;
     for (const g of segs) {
-      const text = cleanLine(g.text);
-      if (!text || /^[\s.,!?…~\-]*$/.test(text)) continue;
-      if (STT.speechFraction(rms, Math.floor(g.start / frameSec), Math.ceil(g.end / frameSec)) < 0.05) continue; // 소리가 거의 없는 곳
+      const text = STT.squeezeRepeats(cleanLine(g.text));
+      if (!text || /^[\s.,!?…~\-]*$/.test(text)) { stats.droppedEmpty++; continue; }
+      if (STT.speechFraction(rms, Math.floor(g.start / frameSec), Math.ceil(g.end / frameSec), thr) < 0.03) { stats.droppedSilent++; continue; }
       const prev = out[out.length - 1], prev2 = out[out.length - 2];
-      if (prev && prev2 && prev.text === text && prev2.text === text) continue; // 3번째 이상 반복
+      if (prev && prev2 && prev.text === text && prev2.text === text) { stats.droppedRepeat++; continue; }
       out.push({ start: g.start, end: Math.max(g.end, g.start + 0.1), text });
     }
     return out;
   },
-  /* 코사인 유사도 기반 평균 연결 군집화. k가 있으면 k개로, 없으면 임계값까지 */
   cluster(vecs, k = null, threshold = 0.75) {
     const n = vecs.length; if (!n) return [];
     const V = vecs.map((v) => { let s = 0; for (const x of v) s += x * x; s = Math.sqrt(s) || 1; return Float32Array.from(v, (x) => x / s); });
@@ -735,11 +790,8 @@ const STT = {
     }
     const lab = new Array(n);
     cl.forEach((c, ci) => c.forEach((i) => (lab[i] = ci)));
-    // 처음 말한 순서대로 1, 2, 3…
-    const order = new Map(); const out = lab.map((c) => { if (!order.has(c)) order.set(c, order.size + 1); return order.get(c); });
-    return out;
+    const order = new Map(); return lab.map((c) => { if (!order.has(c)) order.set(c, order.size + 1); return order.get(c); });
   },
-  /* 화자 판별용 조각: 너무 짧으면 1초로 늘리고, 길면 가운데 8초 */
   clipFor(x, start, end, sr = STT.SR) {
     let a = Math.round(start * sr), b = Math.round(end * sr);
     if (b - a < sr) { const c = (a + b) >> 1; a = c - (sr >> 1); b = a + sr; }
@@ -747,7 +799,6 @@ const STT = {
     a = Math.max(0, a); b = Math.min(x.length, Math.max(b, a + 1));
     return x.slice(a, b);
   },
-  /* 같은 화자가 이어서 말한 구간은 한 문단으로 */
   merge(segs) {
     const out = [];
     for (const g of segs) {
@@ -761,10 +812,10 @@ const STT = {
     return segs.map((g) => `[${hms(Math.floor(g.start))}] ${g.speaker ? speakerName(g.speaker) + ": " : ""}${g.text}`).join("\n");
   },
 
-  /* 전체 과정 */
   async run(m, blob, opt, onProgress) {
     STT.running = true; STT.cancel = false;
     const t0 = performance.now();
+    const stop = () => Object.assign(new Error("자동 전사를 중단했습니다. 회의록은 바뀌지 않았습니다."), { cancelled: true });
     try {
       onProgress({ phase: "load" });
       const key = `${opt.model}|${opt.gpu}|${opt.speakers === 1 ? 1 : "n"}`;
@@ -774,24 +825,32 @@ const STT = {
       const x = await STT.decode(blob);
       const dur = x.length / STT.SR;
       if (dur < 0.5) throw new Error("녹음이 너무 짧아 인식할 수 없습니다.");
-      const rms = STT.frameRms(x);
+      let rms = STT.frameRms(x);
+      const lv = STT.levels(rms);
+      const diag = { audioSec: Math.round(dur * 10) / 10, noiseDb: lv.noiseDb, loudDb: lv.loudDb, thrDb: lv.thrDb };
+      if (lv.loud < 0.0005) throw Object.assign(new Error(`녹음에 소리가 거의 없습니다(가장 큰 구간 ${lv.loudDb}dBFS). 마이크가 꺼져 있었거나 다른 장치가 선택되었을 수 있습니다.`), { diag });
+      diag.gain = Math.round(STT.normalize(x, lv.loud) * 10) / 10;
+      rms = STT.frameRms(x); const thr = lv.thr * diag.gain;
       const wins = STT.splitWindows(x.length, rms);
+      diag.windows = wins.length; diag.skippedWindows = 0;
       let segs = [];
       for (let i = 0; i < wins.length; i++) {
-        if (STT.cancel) throw Object.assign(new Error("자동 전사를 중단했습니다. 회의록은 바뀌지 않았습니다."), { cancelled: true });
-        const w = wins[i], off = w.start / STT.SR;
+        if (STT.cancel) throw stop();
+        const w = wins[i], off = w.start / STT.SR, wl = (w.end - w.start) / STT.SR;
         onProgress({ phase: "asr", done: i, total: wins.length, audioSec: dur, elapsed: (performance.now() - t0) / 1000 });
-        if (STT.speechFraction(rms, Math.floor(w.start / STT.SR / 0.02), Math.ceil(w.end / STT.SR / 0.02)) < 0.02) continue; // 무음 창은 건너뜀
+        if (STT.speechFraction(rms, Math.floor(w.start / STT.SR / 0.02), Math.ceil(w.end / STT.SR / 0.02), thr) < 0.01) { diag.skippedWindows++; continue; }
         const part = await eng.asr(x.subarray(w.start, w.end));
-        for (const c of part) segs.push({ start: off + Math.max(0, c.start), end: off + Math.min(c.end ?? (w.end - w.start) / STT.SR, (w.end - w.start) / STT.SR), text: c.text });
+        for (const c of part) segs.push({ start: off + Math.max(0, c.start), end: off + Math.min(c.end ?? wl, wl), text: c.text });
       }
-      segs = STT.cleanSegments(segs, rms);
-      if (!segs.length) throw new Error("녹음에서 말소리를 인식하지 못했습니다. 녹음 음량이 너무 작거나 말소리가 없을 수 있습니다.");
+      diag.rawSegments = segs.length;
+      segs = STT.cleanSegments(segs, rms, thr, diag);
+      diag.device = eng.device; diag.dtype = eng.dtype; diag.fellBack = !!eng.fellBack;
+      if (!segs.length) throw Object.assign(new Error("녹음에서 말소리를 받아쓰지 못했습니다. 아래 진단 정보를 확인하세요."), { diag });
       let nSpk = 1;
       if (opt.speakers !== 1 && segs.length > 1) {
         const vecs = [];
         for (let i = 0; i < segs.length; i++) {
-          if (STT.cancel) throw Object.assign(new Error("자동 전사를 중단했습니다. 회의록은 바뀌지 않았습니다."), { cancelled: true });
+          if (STT.cancel) throw stop();
           onProgress({ phase: "spk", done: i, total: segs.length });
           vecs.push(await eng.embed(STT.clipFor(x, segs[i].start, segs[i].end)));
         }
@@ -800,7 +859,7 @@ const STT = {
         nSpk = Math.max(...lab);
       } else segs.forEach((g) => (g.speaker = 1));
       const merged = STT.merge(segs);
-      return { segments: merged, speakers: nSpk, device: eng.device, model: eng.model, seconds: (performance.now() - t0) / 1000, audioSec: dur };
+      return { segments: merged, speakers: nSpk, device: eng.device, model: eng.model, seconds: (performance.now() - t0) / 1000, audioSec: dur, diag };
     } finally { STT.running = false; }
   },
 };
@@ -866,42 +925,65 @@ function sttPct(p) {
 async function startStt(m) {
   if (STT.running) return;
   const o = sttOpts();
-  const status = () => $("#stt-status"), bar = () => $("#stt-bar i");
-  const show = (html, cls = "warn") => { const el = status(); if (el) el.innerHTML = `<div class="alert ${cls}">${html}</div>`; };
   const blob = await DB.audio(m.id).catch(() => null);
-  if (!blob) { show("이 회의의 녹음 파일을 찾을 수 없습니다.", "err"); return; }
+  if (!blob) { STT.last = { id: m.id, error: "이 회의의 녹음 파일을 찾을 수 없습니다." }; render(); return; }
   STT.last = { id: m.id, p: { phase: "load" } };
-  const upd = (p) => { STT.last = { id: m.id, p }; const el = status(); if (el) el.innerHTML = `<div class="stt-run"><span>${esc(sttProgressText(p))}</span></div>`; const b = bar(); if (b) b.style.width = sttPct(p) + "%"; };
-  renderSttButtons(true); upd({ phase: "load" });
+  const upd = (p) => {
+    STT.last = { id: m.id, p };
+    const el = $("#stt-status"); if (el) el.innerHTML = `<div class="stt-run"><span>${esc(sttProgressText(p))}</span></div>`;
+    const b = $("#stt-bar i"); if (b) b.style.width = sttPct(p) + "%";
+  };
+  STT.running = true; render(); upd({ phase: "load" });
   try {
     const r = await STT.run(m, blob, o, upd);
     const text = STT.toText(r.segments, (n) => `화자 ${n}`);
     const fresh = await DB.get(m.id);
     if (!fresh) throw new Error("작업 중 회의가 삭제되었습니다.");
-    fresh.transcript = { text, editedAt: new Date().toISOString(), source: "auto", model: r.model.split("/").pop(), device: r.device, speakers: r.speakers, autoHash: hashText(text), autoAt: new Date().toISOString() };
+    const now = new Date().toISOString();
+    fresh.transcript = { text, editedAt: now, source: "auto", model: r.model.split("/").pop(), device: r.device, speakers: r.speakers, autoHash: hashText(text), autoAt: now, diag: r.diag };
     await DB.put(fresh);
-    STT.last = { id: m.id, done: `자동 전사를 마쳤습니다: ${r.segments.length}개 발언, 화자 ${r.speakers}명, 녹음 ${hms(r.audioSec)}을 ${hms(r.seconds)}에 처리(${r.device === "webgpu" ? "그래픽 가속" : "CPU"}). 녹음과 대조해 고친 뒤 ‘회의록 저장’을 누르세요.` };
+    STT.last = { id: m.id, done: `자동 전사를 마쳤습니다: ${r.segments.length}개 발언, 화자 ${r.speakers}명, 녹음 ${hms(r.audioSec)}을 ${hms(r.seconds)}에 처리(${r.device === "webgpu" ? "그래픽 가속" : "CPU"}). 녹음과 대조해 확인하세요.` };
     toast("자동 전사를 마쳤습니다.");
   } catch (e) {
-    STT.last = { id: m.id, error: e.message || String(e), cancelled: !!e.cancelled };
+    STT.last = { id: m.id, error: e.message || String(e), cancelled: !!e.cancelled, diag: e.diag || null };
   }
-  if (S.tab === "meetings" && S.detailId === m.id && !S.editing) render(); else renderSttButtons(false);
-}
-function renderSttButtons(running) {
-  const s = $("#stt-start"), c = $("#stt-cancel");
-  if (s) s.disabled = running; if (c) c.hidden = !running;
-  const b = $("#stt-bar"); if (b) b.hidden = !running;
+  STT.running = false;
+  if (S.tab === "meetings" && S.detailId === m.id && !S.editing) render();
 }
 
-function renderTranscriptCard(el, m) {
-  const t = m.transcript, o = sttOpts();
-  const mine = STT.last && STT.last.id === m.id ? STT.last : null;
-  const runningHere = STT.running && mine;
-  const sp = t ? speakersInText(t.text) : [];
-  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">회의록</h2>
-      ${t ? `<span class="small muted">${esc(transcriptMethod(t))} · 마지막 저장 ${fmtDate(t.editedAt)} ${fmtTime(t.editedAt)}</span>` : ""}</div>
-    <div class="stt-box">
-      <h3 style="margin-top:4px">자동 전사 · 화자 구분 <span class="badge">이 PC에서 처리</span></h3>
+const SPK_COLORS = 6;
+function txtPreviewHtml(m) {
+  const lines = txtFile(m).replace(/\r/g, "").replace(/\n$/, "").split("\n");
+  const sep = lines.findIndex((l) => /^─+$/.test(l));
+  const head = sep >= 0 ? lines.slice(0, sep) : [], body = sep >= 0 ? lines.slice(sep + 1) : lines;
+  const order = speakersInText(m.transcript.text).map((x) => x.name);
+  const row = (line) => {
+    const mm = line.match(SPEAKER_LINE);
+    if (!mm) return `<div class="tl">${esc(line) || "&nbsp;"}</div>`;
+    const i = Math.max(0, order.indexOf(mm[2].trim())) % SPK_COLORS;
+    return `<div class="tl">${mm[1] ? `<span class="ts">${esc(mm[1].trim())}</span> ` : ""}<span class="spk c${i}">${esc(mm[2].trim())}</span> ${esc(line.slice(mm[0].length))}</div>`;
+  };
+  return `<div class="txt-view" data-testid="txt-view"><div class="txt-headlines">${head.map((l) => `<div>${esc(l)}</div>`).join("")}</div>${body.map(row).join("")}</div>`;
+}
+function diagHtml(d, open) {
+  if (!d) return "";
+  const tips = [];
+  if (d.loudDb != null && d.loudDb < -35) tips.push("녹음 음량이 작습니다. 마이크를 말하는 사람 가까이 두거나 외장 마이크를 쓰면 인식이 좋아집니다.");
+  if (d.windows && d.skippedWindows / d.windows > 0.5) tips.push("구간의 절반 이상을 무음으로 판단해 건너뛰었습니다. 실제로 말한 구간이 빠졌다면 알려 주세요.");
+  if (d.droppedSilent > 2) tips.push("소리가 거의 없는 곳에서 나온 문장을 걸러냈습니다(Whisper가 무음에서 지어내는 문장 방지).");
+  if (d.fellBack) tips.push("그래픽 가속 결과가 깨져 CPU로 다시 인식했습니다.");
+  const dt = d.dtype ? Object.entries(d.dtype).map(([k, v]) => `${k.replace("_model", "").replace("_merged", "")} ${v}`).join(", ") : "";
+  return `<details class="privacy" ${open ? "open" : ""} data-testid="diag"><summary>자동 전사 진단 정보</summary><dl class="meta small" style="margin-top:6px">
+    <dt>녹음 길이</dt><dd>${hms(d.audioSec || 0)}</dd>
+    <dt>음량</dt><dd>큰 소리 ${d.loudDb} dBFS · 잡음 ${d.noiseDb} dBFS${d.gain > 1 ? ` · 인식 전 ${d.gain}배 키움` : ""}</dd>
+    <dt>무음 기준</dt><dd>${d.thrDb} dBFS (이 녹음의 잡음 수준에 맞춤)</dd>
+    ${d.windows != null ? `<dt>인식 구간</dt><dd>${d.windows}개 중 무음으로 건너뜀 ${d.skippedWindows}개</dd>` : ""}
+    ${d.rawSegments != null ? `<dt>받아쓴 문장</dt><dd>${d.rawSegments}개 → 걸러냄: 무음 ${d.droppedSilent || 0}, 반복 ${d.droppedRepeat || 0}, 빈 문장 ${d.droppedEmpty || 0}</dd>` : ""}
+    ${d.device ? `<dt>처리 장치</dt><dd>${d.device === "webgpu" ? "그래픽 가속(WebGPU)" : "CPU(WASM)"}${dt ? ` · ${esc(dt)}` : ""}</dd>` : ""}
+  </dl>${tips.length ? `<ul class="small">${tips.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>` : ""}</details>`;
+}
+function sttBoxHtml(o, runningHere, mine) {
+  return `<div class="stt-box">
       <div class="stt-opts">
         <label><span class="small muted">정확도</span><select id="stt-model" ${STT.running ? "disabled" : ""}>${Object.entries(STT.MODELS).map(([k, v]) => `<option value="${k}" ${o.model === k ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select></label>
         <label><span class="small muted">참석자 수</span><select id="stt-spk" ${STT.running ? "disabled" : ""}>
@@ -914,29 +996,50 @@ function renderTranscriptCard(el, m) {
         <button class="btn primary" id="stt-start" ${STT.running ? "disabled" : ""}>자동 전사 시작</button>
         <button class="btn" id="stt-cancel" ${runningHere ? "" : "hidden"}>중단</button>
       </div>
-      <div class="meter" id="stt-bar" ${runningHere ? "" : "hidden"} style="max-width:none;margin:10px 0 0"><i style="width:${runningHere ? sttPct(mine.p) : 0}%"></i></div>
-      <div id="stt-status" aria-live="polite">${runningHere ? `<div class="stt-run"><span>${esc(sttProgressText(mine.p))}</span></div>`
-        : STT.running ? `<div class="alert warn">다른 회의의 자동 전사가 진행 중입니다. 끝난 뒤 시작하세요.</div>`
-        : mine?.error ? `<div class="alert ${mine.cancelled ? "warn" : "err"}" role="alert">${esc(mine.error)}</div>`
-        : mine?.done ? `<div class="alert ok">${esc(mine.done)}</div>` : ""}</div>
       <div id="stt-confirm"></div>
       <details class="privacy"><summary>자동 전사 안내</summary><ul class="small">
         <li><b>음성은 외부로 전송되지 않습니다.</b> 이 브라우저 안에서 음성 인식(Whisper)과 화자 구분(WavLM)을 실행합니다.</li>
-        <li>처음 한 번 모델 파일(수백 MB, ‘정확’은 1GB 안팎)을 인터넷(huggingface.co, cdn.jsdelivr.net)에서 내려받습니다. https 주소(예: GitHub Pages)에서 열면 브라우저에 저장되어 다음부터 다시 받지 않습니다.</li>
-        <li>처리 시간은 PC 성능에 따라 크게 다릅니다. 그래픽 가속이 안 되는 PC에서는 녹음 시간보다 오래 걸릴 수 있습니다. 진행 중에는 이 창을 닫지 마세요.</li>
-        <li>‘화자 1, 화자 2’는 목소리가 비슷한 구간끼리 묶은 번호이며 실제 이름이 아닙니다. 목소리가 비슷하거나 동시에 말하면 잘못 나뉠 수 있어, 참석자 수를 알면 직접 고르는 편이 정확합니다.</li>
-        <li>자동 인식 결과에는 받아쓰기 오류가 있을 수 있습니다. 녹음과 대조해 고친 뒤 저장하세요.</li></ul></details>
-    </div>
-    ${sp.length ? `<div class="spk-box"><h3>화자 이름 바꾸기</h3><p class="small muted">회의록의 ‘화자 1:’ 같은 이름을 한꺼번에 바꿉니다. 녹음을 들어 확인한 이름만 넣으세요.</p>
-      ${sp.map((x, i) => `<div class="rename"><span class="small">${x.count}회</span><span class="spk-from" data-from="${esc(x.name)}">${esc(x.name)} →</span><span class="row" style="flex-wrap:nowrap"><input type="text" maxlength="20" data-spk="${i}" placeholder="새 이름" aria-label="${esc(x.name)}의 새 이름"><button class="btn small" data-spk-apply="${i}">바꾸기</button></span></div>`).join("")}</div>` : ""}
-    <label class="f" for="tx-text">회의록 내용 ${sp.length ? "(형식: [시:분:초] 화자: 발언)" : ""}</label>
-    <textarea id="tx-text" placeholder="자동 전사를 실행하거나 직접 입력하세요" style="min-height:240px">${esc(t?.text || "")}</textarea>
-    <div class="row" style="margin-top:8px">
-      <button class="btn primary" id="tx-save">회의록 저장</button>
-      <label class="btn" style="cursor:pointer">.txt 불러오기<input type="file" id="tx-file" accept=".txt,text/plain" hidden></label>
-      <button class="btn" id="tx-down" ${t ? "" : "disabled"}>회의록 텍스트(.txt) 내려받기</button>
-      <span class="small muted" id="tx-count"></span>
-    </div><div id="tx-msg"></div>`;
+        <li>처음 한 번 모델 파일(수백 MB, ‘가장 정확’은 1GB 이상)을 인터넷(huggingface.co, cdn.jsdelivr.net)에서 내려받습니다. https 주소(예: GitHub Pages)에서 열면 브라우저에 저장되어 다음부터 다시 받지 않습니다.</li>
+        <li>받아쓰기가 부정확하면 정확도를 한 단계 올려 보세요. 그래픽 가속이 되는 PC라면 ‘가장 정확’을 권장합니다.</li>
+        <li>‘화자 1, 화자 2’는 목소리가 비슷한 구간끼리 묶은 번호이며 실제 이름이 아닙니다. 참석자 수를 알면 직접 고르는 편이 정확합니다.</li>
+        <li>처리 중에는 이 창을 닫지 마세요. 그래픽 가속이 안 되는 PC에서는 녹음 시간보다 오래 걸릴 수 있습니다.</li></ul></details>
+    </div>`;
+}
+
+function renderTranscriptCard(el, m) {
+  const t = m.transcript && norm(m.transcript.text) ? m.transcript : null, o = sttOpts();
+  const mine = STT.last && STT.last.id === m.id ? STT.last : null;
+  const runningHere = !!(STT.running && mine && mine.p);
+  const sp = t ? speakersInText(t.text) : [];
+  const status = runningHere ? `<div class="stt-run"><span>${esc(sttProgressText(mine.p))}</span></div>`
+    : STT.running ? `<div class="alert warn">다른 회의의 자동 전사가 진행 중입니다. 끝난 뒤 시작하세요.</div>`
+    : mine?.error ? `<div class="alert ${mine.cancelled ? "warn" : "err"}" role="alert">${esc(mine.error)}</div>`
+    : mine?.done ? `<div class="alert ok">${esc(mine.done)}</div>` : "";
+  const editOpen = !t || t.source !== "auto";
+  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">회의록 · 자동 전사</h2>
+      ${t ? `<span class="small muted" data-testid="tx-method">${esc(transcriptMethod(t))} · 마지막 저장 ${fmtDate(t.editedAt)} ${fmtTime(t.editedAt)}</span>` : ""}</div>
+    <div class="meter" id="stt-bar" ${runningHere ? "" : "hidden"} style="max-width:none;margin:12px 0 0"><i style="width:${runningHere ? sttPct(mine.p) : 0}%"></i></div>
+    <div id="stt-status" aria-live="polite">${status}</div>
+    ${mine?.diag && !runningHere ? diagHtml(mine.diag, true) : ""}
+    ${t ? `
+      <div class="row" style="justify-content:space-between;margin-top:12px"><h3 style="margin:0">회의록 텍스트 (.txt 미리보기)</h3>
+        <div class="row"><button class="btn primary small" id="tx-down">회의록 텍스트(.txt) 내려받기</button><button class="btn small" id="tx-edit-open">고치기</button></div></div>
+      ${txtPreviewHtml(m)}
+      ${sp.length ? `<div class="spk-box"><h3>화자 이름 바꾸기</h3><p class="small muted">‘화자 1’ 같은 이름을 회의록 전체에서 한꺼번에 바꾸고 바로 저장합니다. 녹음을 들어 확인한 이름만 넣으세요.</p>
+        ${sp.map((x, i) => `<div class="rename"><span class="small">${x.count}회</span><span class="spk c${i % SPK_COLORS}">${esc(x.name)}</span><span class="row" style="flex-wrap:nowrap"><input type="text" maxlength="20" data-spk="${i}" placeholder="새 이름" aria-label="${esc(x.name)}의 새 이름"><button class="btn small" data-spk-apply="${i}">바꾸기</button></span></div>`).join("")}
+        <div id="spk-msg"></div></div>` : ""}
+      ${t.diag && !mine?.diag ? diagHtml(t.diag, false) : ""}` : `<p class="muted" style="margin-top:12px">아직 회의록이 없습니다. 아래 ‘자동 전사 시작’으로 녹음을 글자로 바꾸거나 직접 입력하세요.</p>`}
+    ${t ? `<details class="sec" id="stt-more" ${runningHere ? "open" : ""}><summary>자동 전사 ${t.source === "auto" ? "다시 하기" : "하기"} (화자 구분)</summary>${sttBoxHtml(o, runningHere, mine)}</details>` : sttBoxHtml(o, runningHere, mine)}
+    <details class="sec" id="edit-box" ${editOpen ? "open" : ""}><summary>회의록 직접 고치기·입력</summary>
+      <p class="small muted">형식: <code>[시:분:초] 화자: 발언</code> (시각·화자는 없어도 됩니다)</p>
+      <textarea id="tx-text" aria-label="회의록" placeholder="자동 전사를 실행하거나 직접 입력하세요" style="min-height:240px">${esc(t?.text || "")}</textarea>
+      <div class="row" style="margin-top:8px">
+        <button class="btn primary" id="tx-save">회의록 저장</button>
+        <label class="btn" style="cursor:pointer">.txt 불러오기<input type="file" id="tx-file" accept=".txt,text/plain" hidden></label>
+        <span class="small muted" id="tx-count"></span>
+      </div><div id="tx-msg"></div>
+    </details>`;
+
   const ta = $("#tx-text", el), cnt = $("#tx-count", el);
   const upd = () => (cnt.textContent = `${ta.value.length.toLocaleString()}자`); upd(); ta.oninput = upd;
   const optSync = () => saveSttOpts({ model: $("#stt-model", el).value, speakers: +$("#stt-spk", el).value, gpu: $("#stt-gpu", el).checked });
@@ -945,21 +1048,30 @@ function renderTranscriptCard(el, m) {
   $("#stt-start", el).onclick = () => {
     if (STT.running) return;
     const dirty = cleanText(ta.value) !== cleanText(t?.text || "");
-    if (t && norm(t.text) || dirty) {
+    if (t || dirty) {
       $("#stt-confirm", el).innerHTML = `<div class="alert warn">자동 전사가 끝나면 지금 회의록${dirty ? "(저장하지 않은 수정 포함)" : ""}을 자동 전사 결과로 바꿉니다. 필요하면 먼저 ‘회의록 텍스트(.txt) 내려받기’로 보관하세요.
         <div class="row" style="margin-top:8px"><button class="btn primary" id="stt-go">계속</button><button class="btn" id="stt-no">취소</button></div></div>`;
       $("#stt-go", el).onclick = () => { $("#stt-confirm", el).innerHTML = ""; startStt(m); };
       $("#stt-no", el).onclick = () => ($("#stt-confirm", el).innerHTML = "");
     } else startStt(m);
   };
-  el.querySelectorAll("[data-spk-apply]").forEach((b) => b.onclick = () => {
+  const eo = $("#tx-edit-open", el); if (eo) eo.onclick = () => { const d = $("#edit-box", el); d.open = true; d.scrollIntoView({ block: "start" }); ta.focus(); };
+  const td = $("#tx-down", el); if (td) td.onclick = () => downloadBlob(new Blob(["﻿" + txtFile(m)], { type: "text/plain;charset=utf-8" }), `${safeName(typeName(m.typeId))}_${stamp(m.startedAt)}_회의록.txt`);
+  el.querySelectorAll("[data-spk-apply]").forEach((b) => b.onclick = async () => {
     const i = +b.dataset.spkApply, from = sp[i].name, to = cleanLine(el.querySelector(`[data-spk="${i}"]`).value).replace(/[:\[\]]/g, "");
-    if (!to) { toast("새 이름을 입력하세요."); return; }
-    if (sp.some((x) => x.name === to) && !confirmMergeAsk(el, i, from, to)) return;
-    ta.value = renameSpeaker(ta.value, from, to); upd();
-    $("#tx-msg", el).innerHTML = `<div class="alert warn">‘${esc(from)}’을(를) ‘${esc(to)}’(으)로 바꿨습니다. ‘회의록 저장’을 눌러야 저장됩니다.</div>`;
-    el.querySelector(`[data-from="${CSS.escape(from)}"]`).textContent = `${to} →`;
-    sp[i].name = to;
+    const msg = $("#spk-msg", el);
+    if (!to) { msg.innerHTML = `<div class="alert err">새 이름을 입력하세요.</div>`; return; }
+    if (to === from) return;
+    const key = `${from}>${to}`;
+    if (sp.some((x) => x.name === to) && el.dataset.mergeOk !== key) {
+      el.dataset.mergeOk = key;
+      msg.innerHTML = `<div class="alert warn">‘${esc(to)}’은(는) 이미 있는 화자입니다. 바꾸면 ‘${esc(from)}’의 발언이 ‘${esc(to)}’에 합쳐집니다. 맞으면 ‘바꾸기’를 한 번 더 누르세요.</div>`;
+      return;
+    }
+    el.dataset.mergeOk = "";
+    m.transcript = { ...m.transcript, text: renameSpeaker(m.transcript.text, from, to), editedAt: new Date().toISOString() };
+    try { await DB.put(m); toast(`‘${from}’을(를) ‘${to}’(으)로 바꿨습니다.`); render(); }
+    catch (e) { msg.innerHTML = `<div class="alert err">저장하지 못했습니다: ${esc(e.message || e)}</div>`; }
   });
   $("#tx-save", el).onclick = async () => {
     const text = cleanText(ta.value);
@@ -968,7 +1080,6 @@ function renderTranscriptCard(el, m) {
     try { await DB.put(m); toast("회의록을 저장했습니다."); render(); }
     catch (e) { $("#tx-msg", el).innerHTML = `<div class="alert err">저장하지 못했습니다: ${esc(e.message || e)}</div>`; }
   };
-  $("#tx-down", el).onclick = () => downloadBlob(new Blob(["﻿" + txtFile(m)], { type: "text/plain;charset=utf-8" }), `${safeName(typeName(m.typeId))}_${stamp(m.startedAt)}_회의록.txt`);
   $("#tx-file", el).onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
     const msg = $("#tx-msg", el);
@@ -978,14 +1089,6 @@ function renderTranscriptCard(el, m) {
     if (text.includes("�")) { try { text = new TextDecoder("euc-kr").decode(await f.arrayBuffer()); } catch { } }
     ta.value = cleanText(text.replace(/^﻿/, "")); upd(); msg.innerHTML = `<div class="alert warn">불러왔습니다. 내용을 확인한 뒤 ‘회의록 저장’을 누르세요.</div>`;
   };
-}
-/* 이미 있는 이름으로 바꾸면 두 화자가 합쳐진다 — 한 번 더 누르면 진행 */
-function confirmMergeAsk(el, i, from, to) {
-  const key = `${from}>${to}`;
-  if (el.dataset.mergeOk === key) { el.dataset.mergeOk = ""; return true; }
-  el.dataset.mergeOk = key;
-  $("#tx-msg", el).innerHTML = `<div class="alert warn">‘${esc(to)}’은(는) 이미 있는 화자입니다. 바꾸면 ‘${esc(from)}’의 발언이 ‘${esc(to)}’에 합쳐집니다. 맞으면 ‘바꾸기’를 한 번 더 누르세요.</div>`;
-  return false;
 }
 
 /* ---- 회의 결과 ---- */
