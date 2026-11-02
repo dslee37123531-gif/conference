@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>회의록 분석 v2</title>
+<title>회의록 분석 v3</title>
 <style>
 :root{--bg:#f5f6f4;--card:#fff;--ink:#1d2421;--muted:#5d6a64;--line:#dde3df;--accent:#1f6b52;--accent-ink:#fff;--accent-bg:#e3f1eb;--warn:#8a5a00;--warn-bg:#fdf3dc;--bad:#b42323;--bad-bg:#fbe7e7;--rec:#d23b3b;--field:#fff;--mark:#ffe58a}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#131715;--card:#1b201e;--ink:#e6ebe8;--muted:#9aa7a1;--line:#2e3633;--accent:#6fc9a6;--accent-ink:#0f1a15;--accent-bg:#1d3a30;--warn:#f0c46a;--warn-bg:#3a2f16;--bad:#f08a8a;--bad-bg:#3d1f1f;--rec:#ff6b6b;--field:#141816;--mark:#6b5a13}}
@@ -126,6 +126,28 @@ details.privacy summary{cursor:pointer;font-weight:600}
 details.sec{border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:12px 0}
 details.sec>summary{cursor:pointer;font-weight:700}
 details.sec .stt-box{margin-bottom:0}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.chip{background:var(--accent-bg);color:var(--accent);font-weight:700;border-radius:999px;padding:3px 12px;font-size:14px}
+.brief-opts{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto;gap:8px;align-items:end}
+.brief-opts label{display:grid;gap:2px}
+.brief-opts .chk{display:flex;gap:6px;align-items:center;min-height:40px;font-size:14px}
+@media (max-width:640px){.brief-opts{grid-template-columns:minmax(0,1fr)}}
+.brief{border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:14px;background:var(--card)}
+.brief>*:not(.brief-head){margin-left:16px;margin-right:16px}
+.brief-head{background:var(--accent);color:#fff;padding:16px 18px}
+:root[data-theme="dark"] .brief-head{color:#0f1a15}
+.brief-head .small{opacity:.85}
+.brief-title{font-size:22px;font-weight:800;margin:4px 0}
+.brief-preface{border-left:5px solid var(--accent);background:var(--bg);padding:10px 14px;border-radius:8px;font-weight:700;margin-top:14px}
+.brief-topic{border-top:1px solid var(--line);padding:12px 0}
+.brief-th{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:17px}
+.num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-weight:800;font-size:14px}
+.num.top{background:var(--bad);color:#fff}
+.brief ul,.dlist{margin:6px 0 0;padding-left:22px}
+.brief li,.dlist li{margin:3px 0}
+.brief li.sub,.dlist li.sub{list-style:none;color:var(--muted);margin-left:10px}
+.brief-dec{margin-top:6px;font-weight:700;color:var(--accent)}
+.dl-row{margin-top:12px}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:30;max-width:90vw}
 #print-area{display:none}
 @media print{body>*:not(#print-area){display:none!important}#print-area{display:block!important;color:#000;font-size:11pt}#print-area table{border-collapse:collapse;width:100%}#print-area td,#print-area th{border:1px solid #444;padding:4px 6px;text-align:left}#print-area h1{text-align:center;font-size:18pt}#print-area h2{font-size:13pt;margin-top:18pt}.rv{color:#a15c00}}
@@ -133,7 +155,7 @@ details.sec .stt-box{margin-bottom:0}
 </head>
 <body>
 <header class="top"><div class="top-in">
-  <div class="brand">회의록 분석 <span class="badge">v2.1</span></div>
+  <div class="brand">회의록 분석 <span class="badge">v3</span></div>
   <nav class="tabs" aria-label="화면">
     <button data-tab="record" aria-current="page">녹음</button>
     <button data-tab="meetings">회의 기록</button>
@@ -449,7 +471,7 @@ function renderRecord(box) {
     <h2>이 파일로 할 수 있는 것</h2>
     <ul class="small">
       <li>녹음 → 저장 → 재생·내려받기 → <b>자동 전사·화자 구분</b>(회의 기록에서 회의를 열고 ‘자동 전사 시작’) → 화자 이름 바꾸기 → 회의록 텍스트(.txt) 내려받기</li>
-      <li>안건·결정·후속 조치 정리 → 결과 대시보드 → <b>HWPX 보고서</b>·인쇄(PDF)</li>
+      <li><b>회의 결과 자동 정리</b>(결과 대시보드 → 회의 결과 정리): 핵심어·화제별 안건·결정·후속 조치 → HWPX·PDF·대시보드 이미지(PNG)·텍스트 복사</li><li>회의록 내려받기: HWPX·PDF·TXT</li>
       <li class="muted">자동 전사는 이 PC의 브라우저 안에서 실행되어 음성이 외부로 나가지 않습니다. 처음 한 번 모델 파일을 인터넷에서 내려받습니다.</li>
     </ul>
   </section>
@@ -584,15 +606,16 @@ async function renderDetail(box) {
   </section>
   <section class="card" id="tx-card"></section>
   <section class="card" id="result-card"></section>
-  <section class="card"><h2>보고서 내려받기</h2>
+  <section class="card" id="dl-card"><h2>회의록 내려받기</h2>
     <p class="small muted">구성: [회의 종류] 회의록 및 안건 보고서 → 기본 정보 표(회의 유형·일시·녹음 시간·작성일자) → 1. 핵심 요약 및 결정 사항 → 2. 향후 추진 과제 → 3. 회의 녹음 전문. ‘확인 필요’ 항목은 문서에도 [확인 필요]로 표시됩니다.</p>
     ${hasTx ? "" : `<div class="alert warn">회의록을 먼저 입력해야 보고서를 만들 수 있습니다.</div>`}
     <div class="row">
-      <button class="btn primary" id="ex-hwpx" ${hasTx ? "" : "disabled"}>한글 문서(HWPX) 내려받기</button>
-      <button class="btn" id="ex-print" ${hasTx ? "" : "disabled"}>인쇄 / PDF로 저장</button>
-      <button class="btn" id="ex-txt" ${hasTx ? "" : "disabled"}>회의록 텍스트(.txt)</button>
+      <button class="btn primary" id="ex-hwpx" ${hasTx ? "" : "disabled"}>한글(HWPX)</button>
+      <button class="btn" id="ex-pdf" ${hasTx ? "" : "disabled"}>PDF</button>
+      <button class="btn" id="ex-txt" ${hasTx ? "" : "disabled"}>텍스트(TXT)</button>
+      <button class="btn" id="ex-print" ${hasTx ? "" : "disabled"}>인쇄</button>
     </div>
-    <p class="small" style="color:var(--warn)">HWPX는 시험 제공입니다. 한글 문서 표준(OWPML) 구조로 만들었지만 한컴오피스 한글에서 직접 열어 보는 확인은 하지 못했습니다. 열리지 않으면 ‘인쇄 / PDF로 저장’을 사용하세요.</p>
+    <p class="small" style="color:var(--warn)">HWPX는 시험 제공입니다. 한글 문서 표준(OWPML) 구조로 만들었지만 한컴오피스 한글에서 직접 열어 보는 확인은 하지 못했습니다. 열리지 않으면 PDF를 사용하세요. PDF는 이 PC의 글꼴로 그린 페이지 이미지로 만들어 글자 검색·복사는 되지 않습니다.</p>
   </section>`;
   $("#bk", box).onclick = () => { S.detailId = null; S.editing = false; render(); };
   $("#del", box).onclick = () => {
@@ -603,6 +626,7 @@ async function renderDetail(box) {
   const dl = $("#dl-audio", box); if (dl) dl.onclick = () => downloadBlob(blob, m.fileName);
   $("#ex-hwpx", box).onclick = () => exportHwpx(m);
   $("#ex-print", box).onclick = () => printReport(m);
+  $("#ex-pdf", box).onclick = async () => { try { await downloadReportPdf(m); toast("PDF를 내려받았습니다."); } catch (e) { toast("PDF를 만들지 못했습니다: " + (e.message || e)); } };
   $("#ex-txt", box).onclick = () => downloadBlob(new Blob(["\ufeff" + txtFile(m)], { type: "text/plain;charset=utf-8" }), `${safeName(typeName(m.typeId))}_${stamp(m.startedAt)}_회의록.txt`);
   renderTranscriptCard($("#tx-card", box), m);
   renderResultCard($("#result-card", box), m);
@@ -1097,15 +1121,22 @@ function renderResultCard(el, m) {
   const a = m.analysis;
   if (S.editing) return renderEditor(el, m);
   const head = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">회의 결과</h2>
-    <button class="btn small" id="r-edit" ${hasTx ? "" : "disabled"}>${a ? "수정" : "결과 정리하기"}</button></div>`;
+    <div class="row"><button class="btn small primary" id="r-auto" ${hasTx ? "" : "disabled"}>${a ? "다시 자동 정리" : "자동 정리"}</button><button class="btn small" id="r-edit" ${hasTx ? "" : "disabled"}>${a ? "수정" : "직접 정리"}</button></div></div><div id="r-confirm"></div>`;
   if (!hasTx) { el.innerHTML = head + `<div class="empty">회의록을 먼저 입력하세요. 결과는 회의록을 근거로 정리합니다.</div>`; return; }
   const tabs = `<div class="sub-tabs" role="tablist"><button role="tab" data-st="result" aria-selected="${S.detailTab === "result"}">회의 결과</button><button role="tab" data-st="full" aria-selected="${S.detailTab === "full"}">전문 보기</button></div>`;
   let body = "";
   if (S.detailTab === "full") body = transcriptHtml(m);
-  else if (!a) body = `<div class="empty">아직 정리된 결과가 없습니다. ‘결과 정리하기’에서 회의록에 있는 안건·결정·후속 조치를 직접 정리하세요.<br><span class="small">근거 문장을 회의록에서 찾지 못한 항목은 ‘확인 필요’로 표시됩니다.</span></div>`;
+  else if (!a) body = `<div class="empty">아직 정리된 결과가 없습니다. ‘자동 정리’로 회의록에서 핵심어·안건·결정·후속 조치를 뽑거나 ‘직접 정리’하세요.<br><span class="small">근거 문장을 회의록에서 찾지 못한 항목은 ‘확인 필요’로 표시됩니다.</span></div>`;
   else body = resultHtml(m);
   el.innerHTML = head + tabs + body;
   $("#r-edit", el).onclick = () => { S.editing = true; render(); };
+  $("#r-auto", el).onclick = () => {
+    const go = async () => { try { await autoSummarize(m, (() => { let v = { topics: 0, concise: true }; try { Object.assign(v, JSON.parse(localStorage.getItem("mr-sum") || "{}")); } catch { } return { topics: v.topics || null, concise: v.concise }; })()); S.detailTab = "result"; toast("회의 결과를 자동 정리했습니다."); render(); } catch (e) { $("#r-confirm", el).innerHTML = `<div class="alert err">${esc(e.message || e)}</div>`; } };
+    const edited = a && (a.source !== "auto" || (a.autoHash && a.autoHash !== analysisHash(a)));
+    if (!edited) return go();
+    $("#r-confirm", el).innerHTML = `<div class="alert warn">${a.source !== "auto" ? "직접 작성한" : "고친"} 회의 결과가 있습니다. 다시 자동 정리하면 그 내용이 바뀝니다.<div class="row" style="margin-top:8px"><button class="btn primary" id="r-go">다시 정리</button><button class="btn" id="r-no">취소</button></div></div>`;
+    $("#r-go", el).onclick = go; $("#r-no", el).onclick = () => ($("#r-confirm", el).innerHTML = "");
+  };
   el.querySelectorAll("[data-st]").forEach((b) => b.onclick = () => { S.detailTab = b.dataset.st; if (b.dataset.st === "result") S.highlight = null; renderResultCard(el, m); });
   el.querySelectorAll("[data-ev]").forEach((b) => b.onclick = () => { S.highlight = b.dataset.ev; S.detailTab = "full"; renderResultCard(el, m); setTimeout(() => el.querySelector("mark")?.scrollIntoView({ block: "center" }), 0); });
   el.querySelectorAll("[data-done]").forEach((c) => c.onchange = async () => { m.analysis.actions[+c.dataset.done].done = c.checked; await DB.put(m); renderResultCard(el, m); });
@@ -1145,7 +1176,8 @@ function resultHtml(m) {
     <div class="small muted">${esc(typeName(m.typeId))} · ${fmtDate(m.startedAt)} ${fmtTime(m.startedAt).slice(0, 5)} · 녹음 ${hms(m.durationSec)}</div>
     <div class="title" data-testid="r-title">${esc(cleanLine(a.title) || "제목 없음")}</div>
     <div>${esc(cleanText(a.summary) || "요약 없음")}</div>
-    <div class="small muted">직접 작성 · ${fmtDate(a.updatedAt)} ${fmtTime(a.updatedAt).slice(0, 5)}</div>
+    ${(a.keywords || []).length ? `<div class="chips" style="margin:6px 0">${a.keywords.slice(0, 8).map((k) => `<span class="chip">#${esc(k.replace(/\s/g, ""))}</span>`).join("")}</div>` : ""}
+    <div class="small muted">${esc(analysisMethod(a))} · ${fmtDate(a.updatedAt)} ${fmtTime(a.updatedAt).slice(0, 5)}</div>
   </div>
   ${isStale(m) ? `<div class="alert warn">결과를 정리한 뒤 회의록이 수정되었습니다. 결과가 현재 회의록과 맞는지 확인하세요.</div>` : ""}
   ${rc ? `<div class="alert warn" data-testid="review-banner"><b>확인 필요 ${rc}건</b> — 근거 문장을 회의록에서 찾지 못했거나 담당·기한이 회의록에 나오지 않는 항목입니다. 원문과 비교한 뒤 ‘원문 확인했어요’를 누르세요.</div>` : ""}
@@ -1153,7 +1185,7 @@ function resultHtml(m) {
   ${a.agendas.length ? a.agendas.map((g, i) => `<div class="agenda">
      <div class="head"><span class="imp ${g.importance}">${IMPORTANCE[g.importance] || "보통"}</span>${esc(cleanLine(g.title))}
        ${norm(g.decision) ? `<span class="badge ok">결정 있음</span>` : ""}</div>
-     ${norm(g.details) ? `<div style="margin-top:6px">${esc(cleanText(g.details))}</div>` : ""}
+     ${norm(g.details) ? `<ul class="dlist">${detailLines(g.details).map((l) => `<li class="${l.sub ? "sub" : ""}">${esc(l.text)}</li>`).join("")}</ul>` : ""}
      ${evHtml(m, g.evidence)} ${reviewHtml(m, "agenda", g, i)}
      ${norm(g.decision) ? `<div class="decision"><div class="small muted">결정 사항</div><div>${esc(cleanText(g.decision))}</div>${evHtml(m, g.decisionEvidence)} ${reviewHtml(m, "decision", g, i)}</div>`
        : `<div class="small muted" style="margin-top:6px">명시적으로 결정된 사항 없음</div>`}
@@ -1181,7 +1213,7 @@ function renderEditor(el, m) {
     ${a.agendas.map((g, i) => `<div class="edit-item" data-ag="${i}">
       <div class="grid2"><div><label class="f">안건</label><input type="text" data-k="title" value="${esc(g.title)}" maxlength="120"></div>
         <div><label class="f">중요도</label><select data-k="importance">${["high", "medium", "low"].map((v) => `<option value="${v}" ${g.importance === v ? "selected" : ""}>${IMPORTANCE[v]}</option>`).join("")}</select></div></div>
-      <label class="f">논의 내용</label><textarea data-k="details" style="min-height:60px">${esc(g.details)}</textarea>
+      <label class="f">논의 내용 (한 줄에 하나: "- 내용", 예시는 "  (예, …)")</label><textarea data-k="details" style="min-height:110px">${esc(g.details)}</textarea>
       <label class="f">근거 문장 (회의록에서 복사)</label><input type="text" data-k="evidence" value="${esc(g.evidence)}">
       <label class="f">결정 사항 (없으면 비움)</label><input type="text" data-k="decision" value="${esc(g.decision)}">
       <label class="f">결정 근거 문장</label><input type="text" data-k="decisionEvidence" value="${esc(g.decisionEvidence)}">
@@ -1221,7 +1253,7 @@ function renderEditor(el, m) {
       clean.agendas.forEach((g, i) => { const p = prev?.agendas[i]; g.confirmed = !!(p?.confirmed && same(p, g, ["title", "evidence"])); g.decisionConfirmed = !!(p?.decisionConfirmed && same(p, g, ["decision", "decisionEvidence"])); });
       clean.actions.forEach((x, i) => { const p = prev?.actions[i]; x.confirmed = !!(p?.confirmed && same(p, x, ["task", "assignee", "due", "evidence"])); });
       clean.updatedAt = new Date().toISOString(); clean.transcriptHash = hashText(m.transcript.text);
-      m.analysis = clean;
+      m.analysis = { ...(prev || {}), ...clean };
       try { await DB.put(m); S.editing = false; S.detailTab = "result"; toast("회의 결과를 저장했습니다."); render(); }
       catch (e) { $("#e-msg", el).innerHTML = `<div class="alert err">저장하지 못했습니다: ${esc(e.message || e)}</div>`; }
     };
@@ -1241,6 +1273,7 @@ async function renderDashboard(box) {
     <div class="stat"><b>${decisions}</b><span>결정 사항</span></div>
     <div class="stat"><b>${open.length}</b><span>남은 후속 조치</span></div>
   </div>
+  <section class="card" id="brief-card"></section>
   <section class="card"><h2>회의별 결과</h2>${filterBar()}
     ${!all.length ? `<div class="empty">아직 저장된 회의가 없습니다. 녹음을 저장하고 회의록·결과를 정리하면 여기에 모입니다.</div>` :
       !list.length ? `<div class="empty">조건에 맞는 회의가 없습니다.</div>` : `<div class="list">${list.map(meetingCard).join("")}</div>`}
@@ -1252,6 +1285,7 @@ async function renderDashboard(box) {
       : `<p class="muted">남은 후속 조치가 없습니다.</p>`}
   </section>`;
   bindFilters(box);
+  renderBriefingSection($("#brief-card", box), all);
   box.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { S.tab = "meetings"; S.detailId = +b.dataset.open; S.detailTab = "result"; S.editing = false; render(); });
   box.querySelectorAll("[data-od]").forEach((c) => c.onchange = async () => { const [id, i] = c.dataset.od.split(":").map(Number); const m = await DB.get(id); m.analysis.actions[i].done = true; await DB.put(m); toast("완료로 표시했습니다."); render(); });
 }
@@ -1291,7 +1325,7 @@ function buildReport(m, now = new Date()) {
   const r = { title: `[${name}] 회의록 및 안건 보고서`, info, hasAnalysis: !!a, summary: null, note: null, agendas: [], actions: [], lines: [], foot: [] };
   if (a) {
     if (a.title) info.splice(1, 0, ["회의 제목", cleanLine(a.title)]);
-    info.push(["요약 작성", "직접 작성"]);
+    info.push(["요약 작성", analysisMethod(a)]);
     r.summary = cleanText(a.summary).trim() || null;
     if (isStale(m)) r.note = "결과를 정리한 뒤 회의록이 수정되었습니다. 아래 내용은 수정 전 회의록 기준일 수 있습니다.";
     r.agendas = a.agendas.map((g) => ({ title: cleanLine(g.title), importance: IMPORTANCE[g.importance] || "보통", details: cleanText(g.details).trim() || null,
@@ -1300,6 +1334,7 @@ function buildReport(m, now = new Date()) {
   }
   r.lines = cleanText(m.transcript.text).split("\n").map((p) => p.trim()).filter(Boolean);
   if (m.transcript.source === "auto") r.foot.push("녹음 전문은 이 PC에서 실행한 자동 음성 인식 결과로, 받아쓰기·화자 구분 오류가 있을 수 있습니다. ‘화자 N’은 목소리로 나눈 번호입니다.");
+  if (a && a.source === "auto") r.foot.push("핵심 요약과 추진 과제는 회의록에서 핵심어를 뽑고 관련 문장을 발췌해 자동 정리한 것으로, 원문과 대조가 필요합니다.");
   r.foot.push("담당·기한의 ‘미지정’은 회의록에서 확인할 수 없었다는 뜻입니다.");
   if (r.agendas.some((g) => g.agendaReview || g.decisionReview) || r.actions.some((x) => x.note)) r.foot.push("[확인 필요] 표시는 근거 문장을 회의록에서 찾지 못했거나 담당·기한이 회의록에 나오지 않는 항목이므로 원문과 대조하세요.");
   return r;
@@ -1337,7 +1372,7 @@ const HX = (() => {
   const X = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const XA = (s) => X(s).replace(/"/g, "&quot;");
   const CH = { body: [0, 1050, "#000000", 0], title: [1, 1800, "#111827", 1], h1: [2, 1350, "#111827", 1], h2: [3, 1150, "#111827", 1], muted: [4, 950, "#6B7280", 0], review: [5, 950, "#B45309", 1], cell: [6, 1000, "#000000", 0], cellb: [7, 1000, "#111827", 1], label: [8, 1050, "#111827", 1] };
-  const PA = { body: [0, "JUSTIFY", 160, 0, 0, 400], title: [1, "CENTER", 150, 0, 0, 1400], h1: [2, "LEFT", 150, 0, 1800, 600], h2: [3, "LEFT", 150, 0, 900, 300], indent: [4, "JUSTIFY", 160, 1600, 0, 300], cell: [5, "LEFT", 130, 0, 0, 0], cellc: [6, "CENTER", 130, 0, 0, 0] };
+  const PA = { body: [0, "JUSTIFY", 160, 0, 0, 400], title: [1, "CENTER", 150, 0, 0, 1400], h1: [2, "LEFT", 150, 0, 1800, 600], h2: [3, "LEFT", 150, 0, 900, 300], indent: [4, "JUSTIFY", 160, 1600, 0, 300], cell: [5, "LEFT", 130, 0, 0, 0], cellc: [6, "CENTER", 130, 0, 0, 0], bul1: [7, "JUSTIFY", 160, 800, 0, 150], indent2: [8, "JUSTIFY", 160, 2400, 0, 150] };
   const BF_NONE = 1, BF_CELL = 2, BF_HEAD = 3, BF_LABEL = 4;
   const each = (v) => LANGS.map((l) => `${l.toLowerCase()}="${v}"`).join(" ");
   const borderFill = (id, solid, fill) => {
@@ -1354,7 +1389,7 @@ const HX = (() => {
     const chars = Object.values(CH).sort((a, b) => a[0] - b[0]), paras = Object.values(PA).sort((a, b) => a[0] - b[0]);
     return `${DECL}<hh:head ${NS} version="1.4" secCnt="1"><hh:beginNum page="1" footnote="1" endnote="1" pic="1" tbl="1" equation="1"/><hh:refList><hh:fontfaces itemCnt="${LANGS.length}">${fonts}</hh:fontfaces><hh:borderFills itemCnt="${fills.length}">${fills.join("")}</hh:borderFills><hh:charProperties itemCnt="${chars.length}">${chars.map(charPr).join("")}</hh:charProperties><hh:tabProperties itemCnt="1"><hh:tabPr id="0" autoTabLeft="0" autoTabRight="0"/></hh:tabProperties><hh:paraProperties itemCnt="${paras.length}">${paras.map(paraPr).join("")}</hh:paraProperties><hh:styles itemCnt="1"><hh:style id="0" type="PARA" name="바탕글" engName="Normal" paraPrIDRef="0" charPrIDRef="0" nextStyleIDRef="0" langID="1042" lockForm="0"/></hh:styles></hh:refList><hh:compatibleDocument targetProgram="HWP201X"><hh:layoutCompatibility/></hh:compatibleDocument><hh:docOption><hh:linkinfo path="" pageInherit="0" footnoteInherit="0"/></hh:docOption><hh:trackchageConfig flags="56"/></hh:head>`;
   }
-  function section(r) {
+  function section(r, blocks) {
     const parts = []; let pid = 0, tid = 0;
     const run = (t, c) => `<hp:run charPrIDRef="${CH[c][0]}"><hp:t>${X(cleanText(t))}</hp:t></hp:run>`;
     const P = (inner, pa) => `<hp:p id="${++pid}" paraPrIDRef="${PA[pa][0]}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">${inner}</hp:p>`;
@@ -1366,6 +1401,20 @@ const HX = (() => {
       const tbl = `<hp:tbl id="${1000 + tid}" zOrder="${tid}" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1" rowCnt="${rows.length}" colCnt="${widths.length}" cellSpacing="0" borderFillIDRef="${BF_CELL}" noAdjust="0"><hp:sz width="${sum}" widthRelTo="ABSOLUTE" height="${rh * rows.length}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/><hp:inMargin left="510" right="510" top="141" bottom="141"/>${trs}</hp:tbl>`;
       parts.push(P(`<hp:run charPrIDRef="0">${tbl}<hp:t/></hp:run>`, "body"));
     };
+    const renderBlocks = (bl) => bl.forEach((b) => {
+      if (b.t === "title") para([[b.text, "title"]], "title");
+      else if (b.t === "h1") para([[b.text, "h1"]], "h1");
+      else if (b.t === "h2") para([[b.text, "h2"], ...(b.note ? [["  " + b.note, "muted"]] : [])], "h2");
+      else if (b.t === "p") para(b.runs);
+      else if (b.t === "bullet") para([[(b.level === 2 ? "" : "- ") + b.text, b.level === 2 ? "muted" : "body"]], b.level === 2 ? "indent2" : "bul1");
+      else if (b.t === "table") {
+        const W = b.widths.map((w) => Math.round(TEXT_W * w)); W[W.length - 1] = TEXT_W - W.slice(0, -1).reduce((x, y) => x + y, 0);
+        const rows = []; if (b.head) rows.push(b.head.map((h) => [h, "cellb", BF_HEAD]));
+        b.rows.forEach((row) => rows.push(row.map((c, ci) => [String(c ?? ""), b.labelCol && ci === 0 ? "label" : c === UNASSIGNED ? "muted" : "cell", b.labelCol && ci === 0 ? BF_LABEL : BF_CELL])));
+        table(rows, W);
+      }
+    });
+    if (blocks) renderBlocks(blocks); else {
     para([[r.title, "title"]], "title");
     table(r.info.map(([k, v]) => [[k, "label", BF_LABEL], [v, "cell", BF_CELL]]), [9000, TEXT_W - 9000]);
     para([["1. 핵심 요약 및 결정 사항", "h1"]], "h1");
@@ -1377,7 +1426,9 @@ const HX = (() => {
       r.agendas.forEach((g, i) => {
         para([[`${i + 1}) ${g.title}`, "h2"], [`  (중요도 ${g.importance})`, "muted"]], "h2");
         if (g.agendaReview) para([[`[확인 필요] ${g.agendaReview}`, "review"]], "indent");
-        para([["논의: ", "label"], [g.details || "기록 없음", "body"]], "indent");
+        const dl = detailLines(g.details);
+        if (dl.length > 1 || (dl[0] && /^[-•·(]/.test(cleanText(g.details).trim()))) { para([["논의:", "label"]], "indent"); dl.forEach((l) => para([[(l.sub ? "" : "- ") + l.text, l.sub ? "muted" : "body"]], l.sub ? "indent2" : "indent")); }
+        else para([["논의: ", "label"], [g.details || "기록 없음", "body"]], "indent");
         if (g.decision) para([["결정: ", "label"], [g.decision, "body"], ...(g.decisionReview ? [[` [확인 필요] ${g.decisionReview}`, "review"]] : [])], "indent");
         else para([["결정: ", "label"], ["명시적으로 결정된 사항 없음", "muted"]], "indent");
       });
@@ -1394,19 +1445,20 @@ const HX = (() => {
     para([["3. 회의 녹음 전문", "h1"]], "h1");
     r.lines.forEach((l) => para([[l, "body"]]));
     para([[r.foot.join(" "), "muted"]]);
+    }
     const secPr = `<hp:run charPrIDRef="0"><hp:secPr id="" textDirection="HORIZONTAL" spaceColumns="1134" tabStop="8000" tabStopVal="4000" tabStopUnit="HWPUNIT" outlineShapeIDRef="0" memoShapeIDRef="0" textVerticalWidthHead="0" masterPageCnt="0"><hp:grid lineGrid="0" charGrid="0" wonggojiFormat="0"/><hp:startNum pageStartsOn="BOTH" page="0" pic="0" tbl="0" equation="0"/><hp:visibility hideFirstHeader="0" hideFirstFooter="0" hideFirstMasterPage="0" border="SHOW_ALL" fill="SHOW_ALL" hideFirstPageNum="0" hideFirstEmptyLine="0" showLineNumber="0"/><hp:lineNumberShape restartType="0" countBy="0" distance="0" startNumber="0"/><hp:pagePr landscape="WIDELY" width="${PAGE_W}" height="${PAGE_H}" gutterType="LEFT_ONLY"><hp:margin header="4252" footer="4252" gutter="0" left="${MLR}" right="${MLR}" top="${MT}" bottom="${MB}"/></hp:pagePr><hp:footNotePr><hp:autoNumFormat type="DIGIT" userChar="" prefixChar="" suffixChar=")" supscript="0"/><hp:noteLine length="-1" type="SOLID" width="0.12 mm" color="#000000"/><hp:noteSpacing betweenNotes="283" belowLine="567" aboveLine="850"/><hp:numbering type="CONTINUOUS" newNum="1"/><hp:placement place="EACH_COLUMN" beneathText="0"/></hp:footNotePr><hp:endNotePr><hp:autoNumFormat type="DIGIT" userChar="" prefixChar="" suffixChar=")" supscript="0"/><hp:noteLine length="14692344" type="SOLID" width="0.12 mm" color="#000000"/><hp:noteSpacing betweenNotes="0" belowLine="567" aboveLine="850"/><hp:numbering type="CONTINUOUS" newNum="1"/><hp:placement place="END_OF_DOCUMENT" beneathText="0"/></hp:endNotePr>${["BOTH", "EVEN", "ODD"].map((t) => `<hp:pageBorderFill type="${t}" borderFillIDRef="${BF_NONE}" textBorder="PAPER" headerInside="0" footerInside="0" fillArea="PAPER"><hp:offset left="1417" right="1417" top="1417" bottom="1417"/></hp:pageBorderFill>`).join("")}</hp:secPr><hp:ctrl><hp:colPr id="" type="NEWSPAPER" layout="LEFT" colCount="1" sameSz="1" sameGap="0"/></hp:ctrl></hp:run>`;
     const i = parts[0].indexOf(">") + 1; parts[0] = parts[0].slice(0, i) + secPr + parts[0].slice(i);
     return `${DECL}<hs:sec ${NS}>${parts.join("")}</hs:sec>`;
   }
-  function files(r) {
+  function files(r, blocks) {
     const hpf = `${DECL}<opf:package ${NS} version="" unique-identifier="" id=""><opf:metadata><opf:title>${X(r.title)}</opf:title><opf:language>ko</opf:language><opf:meta name="creator" content="text">회의록 분석</opf:meta></opf:metadata><opf:manifest><opf:item id="header" href="Contents/header.xml" media-type="application/xml"/><opf:item id="section0" href="Contents/section0.xml" media-type="application/xml"/><opf:item id="settings" href="settings.xml" media-type="application/xml"/></opf:manifest><opf:spine><opf:itemref idref="header" linear="yes"/><opf:itemref idref="section0" linear="yes"/></opf:spine></opf:package>`;
     const version = `${DECL}<hv:HCFVersion xmlns:hv="http://www.hancom.co.kr/hwpml/2011/version" tagetApplication="WORDPROCESSOR" major="5" minor="1" micro="0" buildNumber="1" os="1" xmlVersion="1.4" application="Hancom Office Hangul" appVersion="11, 0, 0, 0"/>`;
     const container = `${DECL}<ocf:container xmlns:ocf="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:hpf="http://www.hancom.co.kr/schema/2011/hpf"><ocf:rootfiles><ocf:rootfile full-path="Contents/content.hpf" media-type="application/hwpml-package+xml"/><ocf:rootfile full-path="Preview/PrvText.txt" media-type="text/plain"/></ocf:rootfiles></ocf:container>`;
     const manifest = `${DECL}<odf:manifest xmlns:odf="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"/>`;
     const settings = `${DECL}<ha:HWPApplicationSetting xmlns:ha="http://www.hancom.co.kr/hwpml/2011/app" xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"><ha:CaretPosition listIDRef="0" paraIDRef="0" pos="0"/></ha:HWPApplicationSetting>`;
     return [["mimetype", "application/hwp+zip"], ["version.xml", version], ["META-INF/container.xml", container], ["META-INF/manifest.xml", manifest],
-      ["Contents/content.hpf", hpf], ["Contents/header.xml", header()], ["Contents/section0.xml", section(r)], ["settings.xml", settings],
-      ["Preview/PrvText.txt", Array.from(cleanText(plainText(r))).slice(0, 1024).join("")]];
+      ["Contents/content.hpf", hpf], ["Contents/header.xml", header()], ["Contents/section0.xml", section(r, blocks)], ["settings.xml", settings],
+      ["Preview/PrvText.txt", Array.from(cleanText(blocks ? blocksText(blocks) : plainText(r))).slice(0, 1024).join("")]];
   }
   // 압축 없는(STORED) ZIP — mimetype을 첫 항목으로
   const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
@@ -1443,7 +1495,7 @@ const HX = (() => {
       if (doc.getElementsByTagName("parsererror").length) throw new Error(`${name} XML 형식 오류`);
     }
   }
-  return { build(r) { const e = files(r); check(e); return zip(e); } };
+  return { build(r) { const e = files(r); check(e); return zip(e); }, buildBlocks(title, blocks) { const e = files({ title }, blocks); check(e); return zip(e); } };
 })();
 
 function exportHwpx(m) {
@@ -1452,6 +1504,661 @@ function exportHwpx(m) {
     downloadBlob(blob, `${safeName(typeName(m.typeId))}_${stamp(m.startedAt)}_회의록.hwpx`);
     toast("HWPX 보고서를 내려받았습니다.");
   } catch (e) { toast("HWPX를 만들지 못했습니다: " + (e.message || e)); }
+}
+
+/* ---------------- 회의 결과 자동 정리 (이 PC에서 처리, 외부 전송 없음) ----------------
+   회의록(자동 전사 txt)에서
+   1) 핵심어(키워드)를 뽑고  2) 핵심어별로 문장을 묶어 화제(안건)를 만들고
+   3) 문장을 개조식(“~함”, “~할 것”)으로 다듬고  4) 결정·요청(후속 조치)과 담당·기한을 찾는다.
+   - 회의록에 있는 문장만 쓴다(새 사실을 만들지 않음). 모든 항목에 원문 문장(근거)을 붙인다.
+   - 담당·기한은 그 문장에 실제로 나온 표현만 쓰고, 없으면 ‘미지정’.
+   - 규칙 기반 발췌 요약이다(AI가 내용을 이해해 새로 쓰는 요약이 아님). */
+const SUM = {
+  JOSA: ["으로부터", "에서부터", "에게서", "으로서", "으로써", "이라고", "이라는", "에서는", "으로는", "에게는", "께서는", "까지는", "부터는", "에서도", "에게도", "이라도",
+    "께서", "에서", "에게", "한테", "으로", "까지", "부터", "처럼", "보다", "이나", "이랑", "하고", "라고", "라는", "에는", "로는", "와는", "과는", "이며", "에도", "만큼", "마다", "조차", "밖에",
+    "은", "는", "이", "가", "을", "를", "에", "로", "와", "과", "도", "만", "의", "나", "랑", "께"],
+  VERB_END: /(다|요|죠|네|고|서|며|면|게|지|니|까|데|든|세|자|라|어|아|해|했|할|한|된|될|됨|함|임|음|있|없|겠|던|는|을|ㄴ|며|듯|도록|려고|면서|지만|는데|니까|어서|아서|거나|든지)$/,
+  STOP: new Set(("것 거 게 수 등 때 중 뒤 앞 위 안 밖 쪽 분 번 개 명 건 점 측 데 줄 바 듯 만큼 정도 부분 경우 생각 말씀 얘기 이야기 내용 사항 관련 대해 대한 통해 위해 때문 이번 이제 오늘 내일 어제 지금 다음 저희 우리 제가 저는 나는 너무 정말 진짜 그냥 조금 좀 많이 아주 매우 계속 다시 함께 같이 모두 다들 여기 거기 저기 이거 그거 저거 이건 그건 이런 그런 저런 이렇게 그렇게 저렇게 어떻게 무엇 뭔가 누가 언제 어디 왜 그래서 그리고 그러면 그런데 하지만 그러나 또는 혹은 및 또 즉 혹시 일단 아무튼 어쨌든 사실 약간 막 뭐 음 어 아 네 예 아니 그 이 저 각 해당 기존 현재 향후 이후 이전 하나 둘 셋 첫째 둘째 예를 예컨대 가령 들어 들면 감사 수고 안녕 여러분 오케이 진행 필요 하는 하고 하면 해서 있는 없는 같은 되는 하기 되기 보면 보고 봐야 해야 돼야 가지고 가지 그게 이게 저게 그걸 이걸 거의 전혀 바로 먼저 나중 언제나 항상 각자 서로 본인 자체 전체 일부 대부분 관련해서 대해서").split(/\s+/)),
+  GENERIC: new Set("업무 자료 의견 내용 방안 계획 문제 상황 결과 사업 부서 회의 보고 검토 준비 정리 작성 협의 확인 추진 관리 운영 지원 시간 단계 사항 방식 역할 능력 위치 적극적 다른 우선 그리고".split(" ")),
+  LEAD: /^(그리고|그래서|그러면|그런데|그러니까|또한|또|우선|일단|먼저|아무튼|어쨌든|자|네|예)[,\s]+/,
+  FILLER: /(^|\s)(어+|음+|으음|아+|에+|그러니까|그니까|네네|예예)(?=\s|[,.]|$)/g,
+  EXAMPLE: /^(예를\s*들(어|면|자면)|예컨대|예시로|예로|가령|이를테면)[,\s]*/,
+  DECISION: /(하기로|기로\s*(했|하였|결정|합의)|결정(했|하였|됐|되었|함|합니다)|확정(했|하였|됐|되었|함|합니다)|합의(했|하였|됐|되었)|정했|정하였|하는\s*걸로|하는\s*것으로\s*(하겠|합시다|정리))/,
+  REQUEST: /(해\s*주세요|해주세요|주시기\s*바랍|해\s*주시|바랍니다|부탁|해야\s*(합니다|함|돼|됩니다|한다|할)|하도록|하길|하기\s*바람|필요(합니다|함|하다)|챙겨|준비해|검토해|보고해|공유해|제출해|확인해|작성해|마련해|추진해)/,
+  ASSIGNEE: /([가-힣]{2,4}\s?(주무관|주사보|주사|사무관|서기관|팀장|과장|계장|국장|실장|부장|차장|대리|선임|책임|위원|담당|선생)님?|[A-Za-z가-힣]{2,10}(팀|센터|사업단)(?=[에은는이가도의]|\s|$)|[A-Za-z가-힣]{2,9}[가-힣](과|계|실)(?=[에은는이가도의]|\s|$))/,
+  DUE: /(\d{1,2}\s?월\s?\d{1,2}\s?일(까지|전)?|\d{1,2}\s?\/\s?\d{1,2}(까지)?|(이번|다음|다다음)\s?(주|달)(\s?[월화수목금토일]요일)?(까지|중|내)?|[월화수목금토일]요일(까지|중)?|(오늘|내일|모레|금주|차주|월말|연말|분기)\s?(중|내|까지)?|\d+\s?(일|주|개월)\s?(내|이내|안에))/,
+
+  /* 회의록 → 문장 목록 (원문 보존) */
+  sentences(text) {
+    const out = [];
+    cleanText(text).split("\n").forEach((line, li) => {
+      const mm = line.match(SPEAKER_LINE);
+      const time = mm && mm[1] ? mm[1].replace(/[\[\]\s]/g, "") : null;
+      const speaker = mm ? mm[2].trim() : null;
+      const body = mm ? line.slice(mm[0].length) : line;
+      // 문장 끝(. ? ! 또는 ‘다/요’ 뒤 공백)에서 나눈다
+      const parts = body.split(/(?<=[.?!])\s+|(?<=(?:니다|어요|아요|에요|예요|해요|세요|죠|군요|네요|거든요|는데요))\s+(?=[가-힣A-Za-z0-9(])/);
+      for (const raw of parts) {
+        const orig = raw.trim(); if (!orig) continue;
+        const clean = orig.replace(SUM.FILLER, " ").replace(/\s+/g, " ").replace(/^[,.\s]+/, "").trim().replace(SUM.LEAD, "");
+        if (clean.replace(/[^가-힣A-Za-z0-9]/g, "").length < 4) continue;
+        out.push({ i: out.length, line: li, time, speaker, orig, clean });
+      }
+    });
+    return out;
+  },
+  stems(tok) { const c = []; for (const j of SUM.JOSA) if (tok.length - j.length >= 2 && tok.endsWith(j)) c.push(tok.slice(0, -j.length)); return c; },
+  /* 조사 떼기. support(회의록 전체에서 각 줄기가 몇 가지 꼴로 나왔는지)가 있으면
+     ‘AI전략과는’처럼 애매한 말을 다른 문장의 꼴(‘AI전략과가’)과 맞춰 고른다 */
+  stripJosa(tok, support) {
+    const c = SUM.stems(tok);
+    if (!c.length) return tok;
+    if (!support) return c[0];
+    let best = c[0], bv = -1;
+    for (const x of c) { const v = support.get(x)?.size || 0; if (v > bv) { bv = v; best = x; } }
+    if ((support.get(tok)?.size || 0) > bv) return tok;
+    return best;
+  },
+  support(sents) {
+    const sup = new Map(), add = (k, raw) => { if (!sup.has(k)) sup.set(k, new Set()); sup.get(k).add(raw); };
+    sents.forEach((s) => s.clean.replace(/[^가-힣A-Za-z0-9\s]/g, " ").split(/\s+/).filter(Boolean).forEach((t) => { add(t, t); SUM.stems(t).forEach((x) => add(x, t)); }));
+    return sup;
+  },
+  /* 명사로 보이는 낱말 */
+  nouns(sentence, support) {
+    const toks = sentence.replace(/[^가-힣A-Za-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+    const out = [];
+    for (let i = 0; i < toks.length; i++) {
+      const raw = toks[i];
+      let t = SUM.stripJosa(raw, support);
+      if (/^\d+$/.test(t)) continue;
+      if (/[A-Za-z]/.test(t) && /[가-힣]/.test(t)) { /* AI전략과 같은 혼합어는 그대로 */ }
+      else if (t === raw && SUM.VERB_END.test(t) && t.length <= 4) continue;           // 조사가 없고 동사 꼴로 끝나는 짧은 말
+      else if (t !== raw && /(하|되|시키)$/.test(t)) continue;                           // ‘~하’로 끝나면 동사 줄기
+      if (t.length < 2 || SUM.STOP.has(t) || SUM.STOP.has(raw)) continue;
+      if (/^(했|하|되|된|될|있|없|같|않|못)/.test(t) && t.length <= 3) continue;
+      out.push({ w: t, pos: i });
+    }
+    return out;
+  },
+  /* 핵심어 점수: 등장 횟수 × 퍼짐(서로 다른 문장 수) × 희소성, 붙어 나오는 두 낱말(시민 강사)도 후보 */
+  keywords(sents) {
+    const df = new Map(), tf = new Map(), where = new Map();
+    const add = (w, si) => { tf.set(w, (tf.get(w) || 0) + 1); if (!where.has(w)) where.set(w, new Set()); where.get(w).add(si); };
+    const sup = SUM.support(sents);
+    sents.forEach((s, si) => {
+      const ns = SUM.nouns(s.clean, sup); s.nouns = ns.map((n) => n.w);
+      ns.forEach((n) => add(n.w, si));
+      for (let k = 1; k < ns.length; k++) if (ns[k].pos === ns[k - 1].pos + 1) add(ns[k - 1].w + " " + ns[k].w, si);
+    });
+    const N = Math.max(1, sents.length), scored = [];
+    for (const [w, f] of tf) {
+      const d = where.get(w).size;
+      if (d < 2 && !(w.includes(" ") && f >= 2)) continue;           // 한 문장에만 나온 말은 제외
+      const idf = Math.log(1 + N / d);
+      let sc = f * idf * (w.includes(" ") ? 1.6 : 1) * (w.replace(/\s/g, "").length >= 3 ? 1.3 : 1) * (/[A-Za-z0-9]/.test(w) && /[가-힣]/.test(w) ? 1.5 : 1);
+      if (w.split(" ").every((x) => SUM.GENERIC.has(x))) sc *= 0.45;          // 업무·자료 같은 일반어
+      if (/님$/.test(w)) sc *= 0.5;                                           // 과장님 등 호칭은 화제보다 사람
+
+      if (d / N > 0.6 && N > 6) sc *= 0.4;                              // 거의 모든 문장에 나오는 말은 화제로 약함
+      scored.push({ w, score: sc, sents: where.get(w) });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    // 두 낱말 묶음이 강하면 그 안의 낱말보다 우선, 같은 문장들을 거의 공유하는 말은 하나만
+    const picked = [];
+    for (const k of scored) {
+      if (picked.some((p) => (p.w.includes(" ") && p.w.split(" ").includes(k.w)) || (k.w.includes(" ") && k.w.split(" ").includes(p.w) && p.score > k.score * 1.5))) continue;
+      const dup = picked.find((p) => { const inter = [...k.sents].filter((x) => p.sents.has(x)).length; return inter / Math.min(k.sents.size, p.sents.size) > 0.8; });
+      if (dup) { dup.related = dup.related || []; if (dup.related.length < 3) dup.related.push(k.w); continue; }
+      picked.push({ ...k });
+      if (picked.length >= 12) break;
+    }
+    return picked;
+  },
+  /* 개조식으로 다듬기: “~합니다” → “~함”, “~해 주세요” → “~해 줄 것” 등. 뜻은 바꾸지 않는다 */
+  concise(s) {
+    let t = s.replace(/\s+/g, " ").trim().replace(/[.!]+$/, "");
+    const rules = [
+      [/(해|하여)\s?주시기\s?바랍니다$/, "$1 줄 것"], [/(해|하여)\s?주세요$/, "$1 줄 것"], [/주세요$/, "줄 것"], [/바랍니다$/, "바람"],
+      [/하세요$/, "할 것"], [/하십시오$/, "할 것"], [/합시다$/, "하기로 함"],
+      [/했습니다$/, "했음"], [/하였습니다$/, "하였음"], [/겠습니다$/, "겠음"], [/었습니다$/, "었음"], [/았습니다$/, "았음"], [/있습니다$/, "있음"], [/없습니다$/, "없음"], [/습니다$/, "음"],
+      [/(이에요|예요|에요)$/, "임"], [/해요$/, "함"], [/돼요$/, "됨"], [/거든요$/, "음"], [/(는데요|인데요)$/, "임"], [/(죠|지요)$/, ""], [/(네요|군요)$/, "음"],
+    ];
+    for (const [re, rep] of rules) if (re.test(t)) { t = t.replace(re, rep); return t.trim(); }
+    // ‘~ㅂ니다’ → ‘~ㅁ’ (합니다→함, 됩니다→됨, 입니다→임)
+    const m = t.match(/([가-힣])니다$/);
+    if (m) {
+      const c = m[1].charCodeAt(0) - 0xac00;
+      if (c >= 0 && c % 28 === 17) return t.slice(0, -3) + String.fromCharCode(0xac00 + c - 17 + 16);
+    }
+    return t;
+  },
+  find(re, s) { const m = s.match(re); return m ? m[0].trim() : ""; },
+  /* 담당: ‘이름+직급’ 또는 부서명. ‘경우 과장님’처럼 이름 자리에 일반 낱말이 오면 버린다 */
+  assignee(s) {
+    const re = new RegExp(SUM.ASSIGNEE.source, "g");
+    for (const m of s.matchAll(re)) {
+      const t = m[0].trim(), name = t.split(/\s/)[0];
+      const title = /(주무관|주사보|주사|사무관|서기관|팀장|과장|계장|국장|실장|부장|차장|대리|선임|책임|위원|담당|선생)님?$/.test(t) && /\s/.test(t);
+      if (title && (SUM.STOP.has(name) || SUM.GENERIC.has(name) || /(의|을|를|은|는|이|가|에|로|와|과|고|서|면|다|요|시|후|전|중|때|우|들)$/.test(name))) continue;
+      return t;
+    }
+    return "";
+  },
+
+  /* 전체 정리 */
+  run(text, opt = {}) {
+    const sents = SUM.sentences(text);
+    if (sents.length < 2) throw new Error("회의록 문장이 너무 적어 자동 정리할 수 없습니다(2문장 이상 필요).");
+    const kws = SUM.keywords(sents);
+    const nTopics = opt.topics || Math.max(2, Math.min(6, Math.round(sents.length / 4)));
+    // 문장 중요도: 핵심어 점수 합 + 결정·요청 신호
+    const kwScore = new Map(kws.map((k) => [k.w, k.score]));
+    sents.forEach((s) => {
+      s.ex = SUM.EXAMPLE.test(s.clean); s.dec = !s.ex && SUM.DECISION.test(s.clean); s.req = !s.dec && SUM.REQUEST.test(s.clean);
+      s.score = s.nouns.reduce((a, w) => a + (kwScore.get(w) || 0), 0) + (s.dec ? 3 : 0) + (s.req ? 2 : 0);
+      kws.forEach((k) => { if (k.w.includes(" ") && s.clean.replace(/\s+/g, " ").includes(k.w)) s.score += k.score; });
+    });
+    // 화제: 상위 핵심어마다 그 말이 나온 문장을 모은다(한 문장은 가장 강한 화제 하나에만)
+    const topics = kws.slice(0, nTopics).map((k) => ({ key: k.w, related: k.related || [], score: k.score, sents: [] }));
+    const owner = new Map();
+    sents.forEach((s) => {
+      let best = null, bv = 0;
+      topics.forEach((t) => {
+        const has = t.key.includes(" ") ? s.clean.replace(/\s+/g, " ").includes(t.key) || t.key.split(" ").every((w) => s.nouns.includes(w)) : s.nouns.includes(t.key) || t.related.some((r) => s.nouns.includes(r));
+        if (has && t.score > bv) { bv = t.score; best = t; }
+      });
+      if (best) { best.sents.push(s); owner.set(s.i, best); }
+    });
+    // 예시 문장은 바로 앞 문장과 같은 화제로
+    sents.forEach((s, i) => { if (s.ex && i > 0 && owner.has(i - 1) && owner.get(s.i) !== owner.get(i - 1)) { const t = owner.get(s.i); if (t) t.sents = t.sents.filter((x) => x !== s); owner.get(i - 1).sents.push(s); owner.set(s.i, owner.get(i - 1)); } });
+    sents.forEach((s, i) => { if (s.ex && i > 0 && owner.has(s.i) && !owner.has(i - 1) && sents[i - 1].line >= s.line - 1) { const t = owner.get(s.i); t.sents.push(sents[i - 1]); owner.set(i - 1, t); } });
+    // 화제에 들지 않은 결정·요청 문장은 ‘기타’로
+    const extra = sents.filter((s) => !owner.has(s.i) && (s.dec || s.req));
+    let list = topics.filter((t) => t.sents.length);
+    list.forEach((t) => { t.size = t.sents.length; t.weight = t.sents.reduce((a, s) => a + s.score, 0); });
+    list.sort((a, b) => b.weight - a.weight);
+    if (extra.length) list.push({ key: "기타 요청·결정", related: [], sents: extra, other: true, size: extra.length, weight: 0 });
+    const MAXB = opt.maxBullets || 5;
+    const agendas = list.map((t, ti) => {
+      // 중요한 문장 순으로 고른 뒤 말한 순서대로
+      const chosen = [...t.sents].sort((a, b) => b.score - a.score).slice(0, MAXB);
+      // 예시 문장이 골라지면 그 앞 문장도 함께
+      chosen.slice().forEach((s) => { if (s.ex) { const p = t.sents.find((x) => x.i === s.i - 1); if (p && !chosen.includes(p)) chosen.push(p); } });
+      chosen.sort((a, b) => a.i - b.i);
+      const lines = chosen.map((s) => {
+        const c = opt.concise === false ? s.clean.replace(/[.]+$/, "") : SUM.concise(s.clean);
+        return s.ex ? `  (예, ${c.replace(SUM.EXAMPLE, "")})` : `- ${c}`;
+      });
+      const dec = chosen.find((s) => s.dec) || t.sents.find((s) => s.dec);
+      const rep = chosen.find((s) => !s.ex) || chosen[0];
+      const label = t.other ? t.key : t.key + (t.related.length ? ` (${t.related.slice(0, 2).join("·")})` : "");
+      return {
+        title: label, importance: t.other ? "low" : ti === 0 ? "high" : ti < 3 ? "medium" : "low",
+        details: lines.join("\n"), evidence: rep.orig,
+        decision: dec ? SUM.concise(dec.clean) : "", decisionEvidence: dec ? dec.orig : "",
+        confirmed: false, decisionConfirmed: false, keyword: t.other ? null : t.key, mentions: t.size,
+      };
+    });
+    // 후속 조치: 요청 문장(담당·기한은 그 문장에 나온 표현만)
+    const actions = sents.filter((s) => s.req).sort((a, b) => b.score - a.score).slice(0, opt.maxActions || 8).sort((a, b) => a.i - b.i).map((s) => ({
+      task: SUM.concise(s.clean.replace(SUM.EXAMPLE, "")), assignee: SUM.assignee(s.clean), due: SUM.find(SUM.DUE, s.clean), evidence: s.orig, done: false, confirmed: false,
+    }));
+    const top = list.filter((t) => !t.other);
+    const kwList = top.map((t) => t.key);
+    // 발언 비중(화자가 있으면)
+    const spk = new Map(); sents.forEach((s) => { if (s.speaker) spk.set(s.speaker, (spk.get(s.speaker) || 0) + s.clean.length); });
+    const totalLen = [...spk.values()].reduce((a, b) => a + b, 0);
+    const speakers = [...spk.entries()].sort((a, b) => b[1] - a[1]).map(([n, l]) => ({ name: n, share: Math.round(l / totalLen * 100) }));
+    const summary = top.length
+      ? `가장 많이 다룬 화제는 ‘${top[0].key}’(관련 문장 ${top[0].size}개)${top.length > 1 ? `이며, 이어서 ${top.slice(1, 4).map((t) => `‘${t.key}’`).join(", ")}을(를) 논의함` : "임"}.` +
+        (sents.some((s) => s.dec) ? ` 결정 ${sents.filter((s) => s.dec).length}건` : "") + (actions.length ? `${sents.some((s) => s.dec) ? "," : ""} 요청·후속 조치 ${actions.length}건이 나옴.` : (sents.some((s) => s.dec) ? "이 나옴." : ""))
+      : "뚜렷한 핵심어를 찾지 못했습니다. 회의록이 짧거나 화제가 흩어져 있을 수 있습니다.";
+    return {
+      title: kwList.length ? `주요 화제: ${kwList.slice(0, 3).join(" · ")}` : "회의 결과",
+      summary, agendas, actions, keywords: kws.slice(0, 10).map((k) => k.w), speakers,
+      source: "auto", method: "키워드 추출·문장 발췌(규칙 기반)", sentenceCount: sents.length,
+    };
+  },
+};
+
+/* 자동 정리 실행 → 회의 결과로 저장 */
+async function autoSummarize(m, opt = {}) {
+  if (!m.transcript || !norm(m.transcript.text)) throw new Error("회의록이 없습니다. 먼저 자동 전사를 하거나 회의록을 입력하세요.");
+  const r = SUM.run(m.transcript.text, opt);
+  const now = new Date().toISOString();
+  m.analysis = { ...r, preface: m.analysis?.preface || "", updatedAt: now, transcriptHash: hashText(m.transcript.text) };
+  m.analysis.autoHash = analysisHash(m.analysis);
+  await DB.put(m);
+  return m.analysis;
+}
+function analysisHash(a) { return hashText(JSON.stringify([a.title, a.summary, a.agendas.map((g) => [g.title, g.details, g.decision]), a.actions.map((x) => [x.task, x.assignee, x.due])])); }
+function analysisMethod(a) {
+  if (!a) return "";
+  if (a.source !== "auto") return "직접 작성";
+  return `자동 정리(키워드 추출·회의록 문장 발췌)${a.autoHash && a.autoHash !== analysisHash(a) ? " · 사용자 수정" : ""}`;
+}
+
+/* ---------------- 결과 정리(브리핑) 문서 블록: HWPX·PDF·텍스트 공통 ---------------- */
+function briefingBlocks(m) {
+  const a = m.analysis, name = cleanLine(typeName(m.typeId)), s = new Date(m.startedAt);
+  const B = [];
+  B.push({ t: "title", text: `[${name}] 회의 결과` });
+  B.push({ t: "table", labelCol: true, widths: [0.22, 0.78], rows: [
+    ["일시", `${krDate(s)} ${fmtTime(m.startedAt).slice(0, 5)} (녹음 ${hms(m.durationSec)})`],
+    ...(a.speakers && a.speakers.length > 1 ? [["발언 비중", a.speakers.slice(0, 6).map((x) => `${x.name} ${x.share}%`).join(", ")]] : []),
+    ["핵심어", (a.keywords || []).slice(0, 8).map((k) => "#" + k.replace(/\s/g, "")).join(" ") || "-"],
+    ["정리 방식", analysisMethod(a)],
+  ] });
+  if (norm(a.preface)) B.push({ t: "p", runs: [[cleanText(a.preface).trim(), "label"]] });
+  if (norm(a.summary)) B.push({ t: "p", runs: [["요약: ", "label"], [cleanText(a.summary).trim(), "body"]] });
+  B.push({ t: "h1", text: "주요 안건" });
+  if (!a.agendas.length) B.push({ t: "p", runs: [["정리된 안건이 없습니다.", "muted"]] });
+  a.agendas.forEach((g, i) => {
+    const rv = reviewOf(m, "agenda", g);
+    B.push({ t: "h2", text: `${i + 1}. ${cleanLine(g.title)}`, note: g.mentions ? `관련 문장 ${g.mentions}개` : (IMPORTANCE[g.importance] ? `중요도 ${IMPORTANCE[g.importance]}` : "") });
+    if (rv) B.push({ t: "p", runs: [[`[확인 필요] ${rv}`, "review"]] });
+    detailLines(g.details).forEach((l) => B.push({ t: "bullet", level: l.sub ? 2 : 1, text: l.text }));
+    if (norm(g.decision)) B.push({ t: "p", runs: [["→ 결정: ", "label"], [cleanText(g.decision).trim(), "body"], ...(reviewOf(m, "decision", g) ? [[" [확인 필요]", "review"]] : [])] });
+  });
+  B.push({ t: "h1", text: "후속 조치" });
+  if (!a.actions.length) B.push({ t: "p", runs: [["회의록에서 찾은 요청·후속 조치가 없습니다.", "muted"]] });
+  else B.push({ t: "table", head: ["번호", "할 일", "담당", "기한", "상태"], widths: [0.07, 0.53, 0.16, 0.14, 0.1],
+    rows: a.actions.map((x, i) => [String(i + 1), cleanLine(x.task), cleanLine(x.assignee) || UNASSIGNED, cleanLine(x.due) || UNASSIGNED, x.done ? "완료" : "진행"]) });
+  const foot = [];
+  if (a.source === "auto") foot.push("회의록에서 핵심어를 뽑고 관련 문장을 발췌·개조식으로 다듬어 자동 정리한 결과입니다. 원문 회의록과 대조한 뒤 활용하세요.");
+  foot.push("담당·기한의 ‘미지정’은 회의록에서 확인할 수 없었다는 뜻입니다.");
+  B.push({ t: "p", runs: [[foot.join(" "), "muted"]] });
+  return B;
+}
+/* 안건 상세: "- 문장" / "  (예, …)" 줄 → 들여쓰기 수준 */
+function detailLines(details) {
+  return cleanText(details || "").split("\n").map((l) => l.replace(/\s+$/, "")).filter((l) => norm(l)).map((l) => {
+    const sub = /^\s{2,}|^\s*\(예/.test(l);
+    return { sub, text: l.trim().replace(/^[-•·]\s*/, "") };
+  });
+}
+function blocksText(B) {
+  return B.map((b) => {
+    if (b.t === "table") return [b.head, ...b.rows].filter(Boolean).map((r) => r.join(" | ")).join("\n");
+    if (b.t === "bullet") return (b.level === 2 ? "    " : " - ") + b.text;
+    if (b.t === "p") return b.runs.map((r) => r[0]).join("");
+    if (b.t === "h2") return b.text + (b.note ? `  (${b.note})` : "");
+    if (b.t === "h1") return "\n■ " + b.text;
+    return b.text;
+  }).join("\n");
+}
+/* 메신저에 붙여넣기 좋은 짧은 텍스트 */
+function briefingPlain(m) {
+  const a = m.analysis, s = new Date(m.startedAt), out = [];
+  if (norm(a.preface)) out.push(cleanText(a.preface).trim(), "");
+  out.push(`[${cleanLine(typeName(m.typeId))}] 회의 결과 (${krDate(s)} ${fmtTime(m.startedAt).slice(0, 5)})`);
+  if ((a.keywords || []).length) out.push("핵심어: " + a.keywords.slice(0, 6).map((k) => "#" + k.replace(/\s/g, "")).join(" "));
+  out.push("");
+  a.agendas.forEach((g, i) => {
+    out.push(`${i + 1}. ${cleanLine(g.title)}`);
+    detailLines(g.details).forEach((l) => out.push(l.sub ? `   ${l.text}` : `- ${l.text}`));
+    if (norm(g.decision)) out.push(`→ 결정: ${cleanText(g.decision).trim()}`);
+    out.push("");
+  });
+  if (a.actions.length) { out.push("■ 후속 조치"); a.actions.forEach((x) => out.push(`- ${cleanLine(x.task)} (담당 ${cleanLine(x.assignee) || UNASSIGNED}, 기한 ${cleanLine(x.due) || UNASSIGNED})`)); out.push(""); }
+  if (a.source === "auto") out.push("※ 회의록에서 자동 정리(발췌)한 내용입니다. 원문과 대조하세요.");
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+}
+/* 전체 회의록 보고서 → 블록 (PDF용, HWPX와 같은 구성) */
+function reportBlocks(r) {
+  const B = [{ t: "title", text: r.title }, { t: "table", labelCol: true, widths: [0.22, 0.78], rows: r.info }, { t: "h1", text: "1. 핵심 요약 및 결정 사항" }];
+  if (!r.hasAnalysis) B.push({ t: "p", runs: [["회의 결과가 정리되지 않았습니다. (안건·결정 사항을 임의로 작성하지 않았습니다.)", "muted"]] });
+  else {
+    if (r.note) B.push({ t: "p", runs: [["※ " + r.note, "review"]] });
+    B.push({ t: "p", runs: [["요약: ", "label"], [r.summary || "요약 없음", "body"]] });
+    if (!r.agendas.length) B.push({ t: "p", runs: [["정리된 안건이 없습니다.", "muted"]] });
+    r.agendas.forEach((g, i) => {
+      B.push({ t: "h2", text: `${i + 1}) ${g.title}`, note: `중요도 ${g.importance}` });
+      if (g.agendaReview) B.push({ t: "p", runs: [[`[확인 필요] ${g.agendaReview}`, "review"]] });
+      const dl = detailLines(g.details);
+      if (!dl.length) B.push({ t: "p", runs: [["논의: ", "label"], ["기록 없음", "body"]] });
+      else dl.forEach((l) => B.push({ t: "bullet", level: l.sub ? 2 : 1, text: l.text }));
+      B.push({ t: "p", runs: g.decision ? [["결정: ", "label"], [g.decision, "body"], ...(g.decisionReview ? [[` [확인 필요] ${g.decisionReview}`, "review"]] : [])] : [["결정: ", "label"], ["명시적으로 결정된 사항 없음", "muted"]] });
+    });
+  }
+  B.push({ t: "h1", text: "2. 향후 추진 과제" });
+  if (!r.hasAnalysis) B.push({ t: "p", runs: [["회의 결과가 정리되지 않았습니다.", "muted"]] });
+  else if (!r.actions.length) B.push({ t: "p", runs: [["추진 과제가 없습니다.", "muted"]] });
+  else B.push({ t: "table", head: ["번호", "과제", "담당", "기한", "상태", "비고"], widths: [0.06, 0.36, 0.16, 0.14, 0.08, 0.2], rows: r.actions.map((x) => [String(x.no), x.task, x.assignee, x.due, x.status, x.note]) });
+  B.push({ t: "h1", text: "3. 회의 녹음 전문" });
+  r.lines.forEach((l) => B.push({ t: "p", runs: [[l, "body"]] }));
+  B.push({ t: "p", runs: [[r.foot.join(" "), "muted"]] });
+  return B;
+}
+
+/* ---------------- 캔버스 문서 그리기 → PDF (한글은 PC 글꼴로 그려 이미지로 넣음) ---------------- */
+const FONT = `"Malgun Gothic","맑은 고딕","Apple SD Gothic Neo","Noto Sans KR","Noto Sans CJK KR",sans-serif`;
+function wrapText(ctx, text, maxW) {
+  const out = [];
+  for (const para of String(text).split("\n")) {
+    let line = "";
+    const toks = para.split(/(\s+)/);
+    for (const tk of toks) {
+      if (ctx.measureText(line + tk).width <= maxW) { line += tk; continue; }
+      if (line.trim()) { out.push(line.trimEnd()); line = ""; }
+      if (/^\s+$/.test(tk)) continue;
+      if (ctx.measureText(tk).width <= maxW) { line = tk; continue; }
+      for (const ch of tk) { if (ctx.measureText(line + ch).width > maxW && line) { out.push(line); line = ""; } line += ch; }
+    }
+    out.push(line.trimEnd());
+  }
+  return out;
+}
+const DOC = {
+  W: 1240, H: 1754, M: 110,
+  STY: {
+    title: { size: 34, bold: true, color: "#111827", lh: 1.4, before: 0, after: 26, align: "center" },
+    h1: { size: 25, bold: true, color: "#111827", lh: 1.4, before: 30, after: 12 },
+    h2: { size: 21, bold: true, color: "#111827", lh: 1.4, before: 18, after: 6 },
+    body: { size: 18, color: "#111111", lh: 1.65 }, label: { size: 18, bold: true, color: "#111827", lh: 1.65 },
+    muted: { size: 16, color: "#6B7280", lh: 1.6 }, review: { size: 16, bold: true, color: "#B45309", lh: 1.6 },
+  },
+  font(st) { return `${st.bold ? "700 " : ""}${st.size}px ${FONT}`; },
+  /* 블록 → 페이지 캔버스들 */
+  render(blocks) {
+    const pages = []; let ctx, y;
+    const W = DOC.W, H = DOC.H, M = DOC.M, CW = W - 2 * M, bottom = H - M;
+    const newPage = () => { const c = document.createElement("canvas"); c.width = W; c.height = H; ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); ctx.textBaseline = "top"; pages.push(c); y = M; };
+    newPage();
+    const ensure = (h) => { if (y + h > bottom) newPage(); };
+    const lines = (text, st, x, w, align) => {
+      ctx.font = DOC.font(st); ctx.fillStyle = st.color;
+      const lh = st.size * st.lh;
+      for (const ln of wrapText(ctx, text, w)) { ensure(lh); ctx.font = DOC.font(st); ctx.fillStyle = st.color; ctx.fillText(ln, align === "center" ? x + (w - ctx.measureText(ln).width) / 2 : x, y); y += lh; }
+    };
+    const runs = (rs, x, w) => {
+      // 여러 모양이 섞인 문단: 한 줄씩 이어 그린다
+      const st0 = DOC.STY[rs[0][1]] || DOC.STY.body, lh = st0.size * st0.lh;
+      let cx = x; ensure(lh);
+      for (const [text, style] of rs) {
+        const st = DOC.STY[style] || DOC.STY.body; ctx.font = DOC.font(st); ctx.fillStyle = st.color;
+        for (const tk of String(text).split(/(\s+)/)) {
+          if (tk === "\n") { y += lh; cx = x; ensure(lh); continue; }
+          let piece = tk, wd = ctx.measureText(piece).width;
+          if (cx + wd > x + w && cx > x) { if (/^\s+$/.test(tk)) continue; y += lh; cx = x; ensure(lh); }
+          if (wd > w) { for (const ch of piece) { const cw = ctx.measureText(ch).width; if (cx + cw > x + w) { y += lh; cx = x; ensure(lh); } ctx.fillText(ch, cx, y); cx += cw; } continue; }
+          ctx.fillText(piece, cx, y); cx += wd;
+        }
+      }
+      y += lh;
+    };
+    const table = (b) => {
+      const cols = b.widths.map((r) => r * CW), pad = 10, st = DOC.STY.body, stS = { ...st, size: 16 };
+      const rows = [...(b.head ? [{ cells: b.head, head: true }] : []), ...b.rows.map((r) => ({ cells: r }))];
+      const drawRow = (row) => {
+        ctx.font = DOC.font(row.head ? { ...stS, bold: true } : stS);
+        const wrapped = row.cells.map((c, i) => wrapText(ctx, String(c ?? ""), cols[i] - 2 * pad));
+        const h = Math.max(...wrapped.map((w) => w.length)) * stS.size * 1.5 + 2 * pad;
+        if (y + h > bottom) { newPage(); if (b.head && !row.head) drawRow({ cells: b.head, head: true }); }
+        let x = M;
+        wrapped.forEach((wl, i) => {
+          const label = b.labelCol && i === 0;
+          ctx.fillStyle = row.head ? "#E5E7EB" : label ? "#F3F4F6" : "#FFFFFF"; ctx.fillRect(x, y, cols[i], h);
+          ctx.strokeStyle = "#444"; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, cols[i], h);
+          ctx.font = DOC.font({ ...stS, bold: row.head || label });
+          ctx.fillStyle = row.cells[i] === UNASSIGNED ? "#6B7280" : "#111";
+          wl.forEach((ln, k) => ctx.fillText(ln, row.head ? x + (cols[i] - ctx.measureText(ln).width) / 2 : x + pad, y + pad + k * stS.size * 1.5));
+          x += cols[i];
+        });
+        y += h;
+      };
+      rows.forEach(drawRow); y += 14;
+    };
+    for (const b of blocks) {
+      if (b.t === "title" || b.t === "h1" || b.t === "h2") {
+        const st = DOC.STY[b.t]; ensure(st.before + st.size * st.lh * 2); y += st.before;
+        if (b.t === "h2" && b.note) { runs([[b.text, "h2"], ["  " + b.note, "muted"]], M, CW); } else lines(b.text, st, M, CW, st.align);
+        y += st.after;
+      } else if (b.t === "p") { runs(b.runs, M, CW); y += 6; }
+      else if (b.t === "bullet") {
+        const ind = b.level === 2 ? 56 : 18, st = DOC.STY.body; ctx.font = DOC.font(st);
+        const pre = b.level === 2 ? "" : "- ", pw = ctx.measureText(pre).width;
+        const wl = wrapText(ctx, b.text, CW - ind - pw); const lh = st.size * st.lh;
+        wl.forEach((ln, k) => { ensure(lh); ctx.font = DOC.font(st); ctx.fillStyle = b.level === 2 ? "#374151" : st.color; if (k === 0 && pre) ctx.fillText(pre, M + ind, y); ctx.fillText(ln, M + ind + pw, y); y += lh; });
+      } else if (b.t === "table") { ensure(60); table(b); }
+    }
+    // 쪽 번호
+    pages.forEach((c, i) => { const g = c.getContext("2d"); g.font = `14px ${FONT}`; g.fillStyle = "#6B7280"; g.textBaseline = "top"; const t = `${i + 1} / ${pages.length}`; g.fillText(t, (DOC.W - g.measureText(t).width) / 2, DOC.H - 70); });
+    return pages;
+  },
+};
+/* 이미지 페이지들 → PDF (A4) */
+async function canvasesToPdf(pages) {
+  const enc = new TextEncoder(), parts = [], offs = [];
+  let len = 0; const push = (b) => { const u = typeof b === "string" ? enc.encode(b) : b; parts.push(u); len += u.length; };
+  const imgs = [];
+  for (const c of pages) {
+    const blob = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.9));
+    imgs.push({ data: new Uint8Array(await blob.arrayBuffer()), w: c.width, h: c.height });
+  }
+  const n = imgs.length, PW = 595.28, PH = 841.89;
+  // 객체 번호: 1 카탈로그, 2 페이지 목록, 페이지마다 (페이지, 내용, 이미지)
+  push("%PDF-1.4\n%\xe2\xe3\xcf\xd3\n");
+  const obj = (id, body) => { offs[id] = len; push(`${id} 0 obj\n`); if (typeof body === "string") push(body); else body(); push("\nendobj\n"); };
+  obj(1, "<< /Type /Catalog /Pages 2 0 R >>");
+  obj(2, `<< /Type /Pages /Count ${n} /Kids [${imgs.map((_, i) => `${3 + i * 3} 0 R`).join(" ")}] >>`);
+  imgs.forEach((im, i) => {
+    const p = 3 + i * 3, ct = p + 1, ix = p + 2;
+    obj(p, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im${i} ${ix} 0 R >> >> /Contents ${ct} 0 R >>`);
+    const stream = `q ${PW} 0 0 ${PH} 0 0 cm /Im${i} Do Q`;
+    obj(ct, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+    obj(ix, () => { push(`<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${im.data.length} >>\nstream\n`); push(im.data); push("\nendstream"); });
+  });
+  const total = 3 + n * 3, xref = len;
+  let x = `xref\n0 ${total}\n0000000000 65535 f \n`;
+  for (let i = 1; i < total; i++) x += String(offs[i]).padStart(10, "0") + " 00000 n \n";
+  push(x + `trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(parts, { type: "application/pdf" });
+}
+
+/* ---------------- 대시보드 이미지(PNG) — 공유용 한 장 ---------------- */
+function drawDashboardImage(m) {
+  const a = m.analysis, W = 1200, P = 48, CW = W - 2 * P;
+  const c = document.createElement("canvas"); c.width = W; c.height = 10;
+  let ctx = c.getContext("2d");
+  const C = { bg: "#F5F6F4", card: "#FFFFFF", ink: "#1D2421", muted: "#5D6A64", line: "#DDE3DF", accent: "#1F6B52", accentBg: "#E3F1EB", warn: "#8A5A00", warnBg: "#FDF3DC", high: "#B42323" };
+  const f = (sz, b) => `${b ? "700 " : ""}${sz}px ${FONT}`;
+  const draw = (dry) => {
+    let y = 0;
+    const rect = (x, yy, w, h, fill, r = 14, stroke) => { if (dry) return; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, yy, w, h, r) : ctx.rect(x, yy, w, h); ctx.fillStyle = fill; ctx.fill(); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke(); } };
+    const text = (t, x, yy, font, color, maxW) => { ctx.font = font; const ls = wrapText(ctx, t, maxW); const sz = parseInt(font.match(/(\d+)px/)[1]); if (!dry) { ctx.fillStyle = color; ls.forEach((l, i) => ctx.fillText(l, x, yy + i * sz * 1.5)); } return ls.length * sz * 1.5; };
+    if (!dry) { ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, c.height); ctx.textBaseline = "top"; }
+    // 머리 띠
+    const s = new Date(m.startedAt);
+    let hh = 36;
+    ctx.font = f(36, true); const tl = wrapText(ctx, cleanLine(a.title) || "회의 결과", CW - 40).length;
+    const headH = 40 + 30 + tl * 54 + 36 + 34;
+    if (!dry) { ctx.fillStyle = C.accent; ctx.fillRect(0, 0, W, headH); }
+    y = 40;
+    y += text(`${cleanLine(typeName(m.typeId))} · ${krDate(s)} ${fmtTime(m.startedAt).slice(0, 5)} · 녹음 ${hms(m.durationSec)}`, P, y, f(20), "#D7EFE6", CW);
+    y += 6; y += text(cleanLine(a.title) || "회의 결과", P, y, f(36, true), "#FFFFFF", CW);
+    y += 4; y += text(a.speakers && a.speakers.length > 1 ? `발언 비중: ${a.speakers.slice(0, 5).map((x) => `${x.name} ${x.share}%`).join(" · ")}` : analysisMethod(a), P, y, f(18), "#D7EFE6", CW);
+    y = headH + 28;
+    // 머리말
+    if (norm(a.preface)) {
+      ctx.font = f(22, true); const ph = wrapText(ctx, cleanText(a.preface).trim(), CW - 48).length * 33 + 36;
+      rect(P, y, CW, ph, C.card, 14, C.line); if (!dry) { ctx.fillStyle = C.accent; ctx.fillRect(P, y, 6, ph); }
+      text(cleanText(a.preface).trim(), P + 28, y + 18, f(22, true), C.ink, CW - 48); y += ph + 20;
+    }
+    // 핵심어
+    const kws = (a.keywords || []).slice(0, 8);
+    if (kws.length) {
+      let x = P; ctx.font = f(20, true);
+      for (const k of kws) { const t = "#" + k.replace(/\s/g, ""), w = ctx.measureText(t).width + 32; if (x + w > P + CW) { x = P; y += 50; } rect(x, y, w, 40, C.accentBg, 20); if (!dry) { ctx.font = f(20, true); ctx.fillStyle = C.accent; ctx.fillText(t, x + 16, y + 9); } x += w + 10; }
+      y += 62;
+    }
+    // 숫자 칸
+    const dec = a.agendas.filter((g) => norm(g.decision)).length, open = a.actions.filter((x) => !x.done).length, rc = reviewCount(m);
+    const tiles = [["안건", a.agendas.length], ["결정", dec], ["후속 조치", `${open}/${a.actions.length}`], ["확인 필요", rc]];
+    const tw = (CW - 3 * 14) / 4;
+    tiles.forEach(([l, v], i) => { const x = P + i * (tw + 14); rect(x, y, tw, 104, C.card, 14, C.line); if (!dry) { ctx.font = f(38, true); ctx.fillStyle = l === "확인 필요" && rc ? C.warn : C.accent; ctx.fillText(String(v), x + 22, y + 16); ctx.font = f(18); ctx.fillStyle = C.muted; ctx.fillText(l, x + 22, y + 66); } });
+    y += 128;
+    // 안건 카드
+    a.agendas.forEach((g, i) => {
+      const dl = detailLines(g.details); ctx.font = f(20);
+      let ih = 70 + dl.reduce((h, l) => h + wrapText(ctx, l.text, CW - 56 - (l.sub ? 40 : 18)).length * 31 + 4, 0);
+      if (norm(g.decision)) { ctx.font = f(20, true); ih += wrapText(ctx, "→ 결정: " + cleanText(g.decision), CW - 56).length * 31 + 14; }
+      ih += 18;
+      rect(P, y, CW, ih, C.card, 16, C.line);
+      if (!dry) {
+        ctx.beginPath(); ctx.arc(P + 40, y + 38, 18, 0, Math.PI * 2); ctx.fillStyle = i === 0 ? C.high : C.accent; ctx.fill();
+        ctx.font = f(20, true); ctx.fillStyle = "#fff"; const n = String(i + 1); ctx.fillText(n, P + 40 - ctx.measureText(n).width / 2, y + 26);
+      }
+      text(cleanLine(g.title), P + 72, y + 22, f(26, true), C.ink, CW - 260);
+      if (!dry && g.mentions) { ctx.font = f(17); ctx.fillStyle = C.muted; const t = `관련 문장 ${g.mentions}개`; ctx.fillText(t, P + CW - 28 - ctx.measureText(t).width, y + 30); }
+      let yy = y + 70;
+      dl.forEach((l) => { const ind = l.sub ? 64 : 42; if (!dry && !l.sub) { ctx.fillStyle = C.accent; ctx.fillRect(P + 28, yy + 13, 7, 7); } yy += text(l.text, P + ind, yy, f(20), l.sub ? C.muted : C.ink, CW - ind - 28) + 4; });
+      if (norm(g.decision)) { yy += 8; text("→ 결정: " + cleanText(g.decision).trim(), P + 28, yy, f(20, true), C.accent, CW - 56); }
+      y += ih + 16;
+    });
+    // 후속 조치
+    if (a.actions.length) {
+      ctx.font = f(19);
+      const rows = a.actions.map((x) => ({ x, h: Math.max(1, wrapText(ctx, cleanLine(x.task), CW * 0.58 - 40).length) * 29 + 22 }));
+      const th = 70 + rows.reduce((s2, r) => s2 + r.h, 0) + 12;
+      rect(P, y, CW, th, C.card, 16, C.line);
+      text("후속 조치", P + 28, y + 22, f(24, true), C.ink, CW);
+      let yy = y + 70;
+      rows.forEach(({ x, h }) => {
+        if (!dry) { ctx.strokeStyle = C.line; ctx.beginPath(); ctx.moveTo(P + 24, yy); ctx.lineTo(P + CW - 24, yy); ctx.stroke(); }
+        text((x.done ? "☑ " : "☐ ") + cleanLine(x.task), P + 28, yy + 11, f(19), x.done ? C.muted : C.ink, CW * 0.58 - 40);
+        text(`담당 ${cleanLine(x.assignee) || UNASSIGNED}`, P + CW * 0.6, yy + 11, f(18), cleanLine(x.assignee) ? C.ink : C.muted, CW * 0.22);
+        text(`기한 ${cleanLine(x.due) || UNASSIGNED}`, P + CW * 0.82, yy + 11, f(18), cleanLine(x.due) ? C.ink : C.muted, CW * 0.18 - 20);
+        yy += h;
+      });
+      y += th + 16;
+    }
+    // 바닥글
+    const ft = (a.source === "auto" ? "회의록에서 자동 정리(키워드 추출·문장 발췌)한 결과입니다. 원문과 대조한 뒤 활용하세요. " : "") + `작성 ${krDate(new Date())} · 회의록 분석`;
+    y += text(ft, P, y + 4, f(16), C.muted, CW) + 36;
+    return y;
+  };
+  const h = draw(true);
+  c.height = Math.ceil(h); ctx = c.getContext("2d"); ctx.textBaseline = "top";
+  draw(false);
+  return c;
+}
+
+/* ---------------- 내려받기 ---------------- */
+const baseName = (m) => `${safeName(typeName(m.typeId))}_${stamp(m.startedAt)}`;
+async function downloadReportPdf(m) {
+  const pages = DOC.render(reportBlocks(buildReport(m)));
+  downloadBlob(await canvasesToPdf(pages), `${baseName(m)}_회의록.pdf`);
+}
+function downloadBriefingHwpx(m) {
+  const B = briefingBlocks(m);
+  downloadBlob(HX.buildBlocks(B[0].text, B), `${baseName(m)}_회의결과.hwpx`);
+}
+async function downloadBriefingPdf(m) { downloadBlob(await canvasesToPdf(DOC.render(briefingBlocks(m))), `${baseName(m)}_회의결과.pdf`); }
+async function downloadBriefingPng(m) {
+  const c = drawDashboardImage(m);
+  const blob = await new Promise((res) => c.toBlob(res, "image/png"));
+  downloadBlob(blob, `${baseName(m)}_회의결과.png`);
+}
+
+/* ---------------- 결과 대시보드: 회의 결과 정리 ---------------- */
+function briefingHtml(m) {
+  const a = m.analysis, s = new Date(m.startedAt), rc = reviewCount(m);
+  return `<div class="brief" data-testid="brief">
+    <div class="brief-head">
+      <div class="small">${esc(typeName(m.typeId))} · ${krDate(s)} ${fmtTime(m.startedAt).slice(0, 5)} · 녹음 ${hms(m.durationSec)}</div>
+      <div class="brief-title">${esc(cleanLine(a.title) || "회의 결과")}</div>
+      <div class="small">${a.speakers && a.speakers.length > 1 ? `발언 비중: ${esc(a.speakers.slice(0, 5).map((x) => `${x.name} ${x.share}%`).join(" · "))}` : esc(analysisMethod(a))}</div>
+    </div>
+    ${norm(a.preface) ? `<div class="brief-preface">${esc(cleanText(a.preface).trim())}</div>` : ""}
+    ${(a.keywords || []).length ? `<div class="chips">${a.keywords.slice(0, 8).map((k) => `<span class="chip">#${esc(k.replace(/\s/g, ""))}</span>`).join("")}</div>` : ""}
+    ${norm(a.summary) ? `<p class="small muted" style="margin:8px 0">${esc(cleanText(a.summary))}</p>` : ""}
+    ${isStale(m) ? `<div class="alert warn">정리한 뒤 회의록이 바뀌었습니다. ‘다시 자동 정리’를 하거나 내용을 확인하세요.</div>` : ""}
+    ${rc ? `<div class="alert warn small">확인 필요 ${rc}건 — 회의 상세에서 원문과 대조해 확인하세요.</div>` : ""}
+    ${a.agendas.map((g, i) => `<div class="brief-topic">
+      <div class="brief-th"><span class="num ${i === 0 ? "top" : ""}">${i + 1}</span><b>${esc(cleanLine(g.title))}</b>${g.mentions ? `<span class="small muted">관련 문장 ${g.mentions}개</span>` : ""}</div>
+      <ul>${detailLines(g.details).map((l) => `<li class="${l.sub ? "sub" : ""}">${esc(l.text)}</li>`).join("")}</ul>
+      ${norm(g.decision) ? `<div class="brief-dec">→ 결정: ${esc(cleanText(g.decision))}</div>` : ""}
+    </div>`).join("") || `<p class="muted">정리된 안건이 없습니다.</p>`}
+    ${a.actions.length ? `<div class="brief-topic"><div class="brief-th"><b>후속 조치</b></div><ul>${a.actions.map((x) => `<li>${esc(cleanLine(x.task))} <span class="small muted">· 담당 ${esc(cleanLine(x.assignee) || UNASSIGNED)} · 기한 ${esc(cleanLine(x.due) || UNASSIGNED)}</span></li>`).join("")}</ul></div>` : ""}
+    ${a.source === "auto" ? `<p class="small muted">회의록에서 핵심어를 뽑고 관련 문장을 발췌·개조식으로 다듬은 자동 정리입니다(새 내용을 만들지 않음). 원문과 대조한 뒤 활용하세요.</p>` : ""}
+  </div>`;
+}
+
+async function renderBriefingSection(el, all) {
+  const withTx = all.filter((m) => m.transcript && norm(m.transcript.text));
+  if (!withTx.length) {
+    el.innerHTML = `<h2>회의 결과 정리</h2><div class="empty">회의록이 있는 회의가 없습니다. 녹음을 저장한 뒤 회의 상세에서 ‘자동 전사’를 먼저 하세요.</div>`;
+    return;
+  }
+  if (!withTx.some((m) => m.id === S.briefId)) S.briefId = withTx[0].id;
+  const m = withTx.find((x) => x.id === S.briefId);
+  const o = (() => { let v = { topics: 0, concise: true }; try { Object.assign(v, JSON.parse(localStorage.getItem("mr-sum") || "{}")); } catch { } return v; })();
+  const a = m.analysis;
+  el.innerHTML = `<h2>회의 결과 정리</h2>
+    <p class="small muted">회의록(자동 전사 txt)에서 가장 많이 나온 핵심어를 뽑아 화제(안건)별로 문장을 모으고, 결정·요청 사항과 담당·기한을 찾아 한눈에 보이게 정리합니다. 이 PC에서 처리하며 외부로 보내지 않습니다.</p>
+    <div class="brief-opts">
+      <label><span class="small muted">회의</span><select id="b-meeting">${withTx.map((x) => `<option value="${x.id}" ${x.id === m.id ? "selected" : ""}>${esc(typeName(x.typeId))} · ${fmtDate(x.startedAt)} ${fmtTime(x.startedAt).slice(0, 5)}${x.analysis ? " (정리됨)" : ""}</option>`).join("")}</select></label>
+      <label><span class="small muted">안건 수</span><select id="b-topics">${[0, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${o.topics === n ? "selected" : ""}>${n ? n + "개" : "자동"}</option>`).join("")}</select></label>
+      <label class="chk"><input type="checkbox" id="b-concise" ${o.concise ? "checked" : ""}> 개조식으로 다듬기(~함, ~할 것)</label>
+    </div>
+    <label class="f" for="b-preface">머리말 (선택 — 공유할 때 맨 위에 넣을 문구)</label>
+    <input type="text" id="b-preface" maxlength="200" placeholder="예: 과장님 회의 내용 전달입니다. (화~금 해외 출장)" value="${esc(a?.preface || S.pendingPreface || "")}">
+    <div class="row" style="margin-top:10px">
+      <button class="btn primary" id="b-run">${a ? "다시 자동 정리" : "자동 정리"}</button>
+      <span id="b-msg"></span>
+    </div>
+    <div id="b-confirm"></div>
+    ${a ? `${briefingHtml(m)}
+      <div class="row dl-row">
+        <button class="btn primary" id="b-hwpx">한글(HWPX)</button>
+        <button class="btn" id="b-png">대시보드 이미지(PNG)</button>
+        <button class="btn" id="b-pdf">PDF</button>
+        <button class="btn" id="b-copy">텍스트 복사</button>
+        <button class="btn" id="b-open">회의 상세에서 고치기</button>
+      </div><div id="b-copybox"></div>` : `<div class="empty">아직 정리되지 않았습니다. ‘자동 정리’를 누르세요.</div>`}`;
+  const saveO = () => { try { localStorage.setItem("mr-sum", JSON.stringify({ topics: +$("#b-topics", el).value, concise: $("#b-concise", el).checked })); } catch { } };
+  $("#b-topics", el).onchange = saveO; $("#b-concise", el).onchange = saveO;
+  $("#b-meeting", el).onchange = (e) => { S.briefId = +e.target.value; render(); };
+  const pf = $("#b-preface", el);
+  pf.onchange = async () => {
+    const v = cleanLine(pf.value);
+    if (m.analysis) { m.analysis.preface = v; await DB.put(m); render(); } else S.pendingPreface = v;
+  };
+  const run = async () => {
+    const msg = $("#b-msg", el);
+    try {
+      if (!m.analysis) m.analysis = null;
+      const pre = cleanLine(pf.value);
+      await autoSummarize(m, { topics: +$("#b-topics", el).value || null, concise: $("#b-concise", el).checked });
+      m.analysis.preface = pre; m.analysis.autoHash = analysisHash(m.analysis); await DB.put(m);
+      S.pendingPreface = "";
+      toast("회의 결과를 자동 정리했습니다."); render();
+    } catch (e) { msg.innerHTML = `<span class="alert err" style="display:inline-block;margin:0">${esc(e.message || e)}</span>`; }
+  };
+  $("#b-run", el).onclick = () => {
+    const edited = a && (a.source !== "auto" || (a.autoHash && a.autoHash !== analysisHash(a)));
+    if (edited) {
+      $("#b-confirm", el).innerHTML = `<div class="alert warn">이 회의에는 ${a.source !== "auto" ? "직접 작성한" : "고친"} 회의 결과가 있습니다. 다시 자동 정리하면 그 내용이 바뀝니다.
+        <div class="row" style="margin-top:8px"><button class="btn primary" id="b-go">다시 정리</button><button class="btn" id="b-no">취소</button></div></div>`;
+      $("#b-go", el).onclick = run; $("#b-no", el).onclick = () => ($("#b-confirm", el).innerHTML = "");
+    } else run();
+  };
+  if (!a) return;
+  const guard = (fn) => async () => { try { await fn(m); toast("내려받았습니다."); } catch (e) { toast("만들지 못했습니다: " + (e.message || e)); } };
+  $("#b-hwpx", el).onclick = guard(downloadBriefingHwpx);
+  $("#b-png", el).onclick = guard(downloadBriefingPng);
+  $("#b-pdf", el).onclick = guard(downloadBriefingPdf);
+  $("#b-open", el).onclick = () => { S.tab = "meetings"; S.detailId = m.id; S.detailTab = "result"; S.editing = false; render(); };
+  $("#b-copy", el).onclick = async () => {
+    const t = briefingPlain(m);
+    try { await navigator.clipboard.writeText(t); toast("텍스트를 복사했습니다. 메신저에 붙여넣으세요."); }
+    catch {
+      $("#b-copybox", el).innerHTML = `<p class="small muted">자동 복사가 막혀 있습니다. 아래 글을 선택해 복사(Ctrl+C)하세요.</p><textarea readonly style="min-height:200px">${esc(t)}</textarea>`;
+      const ta = $("#b-copybox textarea", el); ta.focus(); ta.select();
+    }
+  };
 }
 
 /* ---------------- 시작 ---------------- */
