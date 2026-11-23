@@ -164,6 +164,9 @@ details.sec .stt-box{margin-bottom:0}
 .pre-check summary{cursor:pointer;font-weight:700;min-height:32px}
 .state.error .dot{background:var(--bad)}
 .recover{border-color:var(--warn)}
+.diar-t{width:100%;border-collapse:collapse;font-size:14px;margin:8px 0}
+.diar-t th,.diar-t td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
+.spk.cx{background:var(--bg);color:var(--muted);border:1px dashed var(--line)}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:30;max-width:90vw}
 #print-area{display:none}
 @media print{body>*:not(#print-area){display:none!important}#print-area{display:block!important;color:#000;font-size:11pt}#print-area table{border-collapse:collapse;width:100%}#print-area td,#print-area th{border:1px solid #444;padding:4px 6px;text-align:left}#print-area h1{text-align:center;font-size:18pt}#print-area h2{font-size:13pt;margin-top:18pt}.rv{color:#a15c00}}
@@ -1392,6 +1395,201 @@ const STT = {
     cl.forEach((c, ci) => c.forEach((i) => (lab[i] = ci)));
     const order = new Map(); return lab.map((c) => { if (!order.has(c)) order.set(c, order.size + 1); return order.get(c); });
   },
+  /* ---------------- 화자 분리 v2 (신뢰도 기반) ----------------
+     수정 전 문제: 발화마다 목소리 특징 1개 → 고정 기준(0.75)만 넘으면 합치는 방식이라
+       짧은 발화·잡음·감정 변화·겹쳐 말하기처럼 ‘누구와도 덜 닮은’ 발화가 각각 새 화자(화자 3, 4…)가 됐다.
+     바꾼 점
+       1) 발화를 2초 창으로 나눠 특징을 여러 번 재고 평균(짧은 발화를 이웃 소리로 늘리지 않음)
+       2) 말소리 1.5초 이상인 ‘믿을 만한’ 발화만으로 화자를 만든다
+       3) 화자 하나로 인정하려면 말소리가 충분해야 함(MIN_SPK_SEC). 모자라면 새 화자를 만들지 않음
+       4) 예상 화자 수가 있으면 그 수로 묶되, 목소리가 뚜렷이 다른 충분한 분량은 억지로 합치지 않고 경고
+       5) 짧거나 애매한 발화는 가장 닮은 화자와 차이가 충분할 때만 배정, 아니면 앞뒤 발화로 판단, 그래도 모르면 ‘화자 미확정’
+       6) 한 발화 안에서 창마다 다른 화자로 나오면 ‘겹침’으로 표시(추측해서 한 사람에게 주지 않음)
+     기준값은 WavLM 화자 검증 모델 안내(같은 사람 0.86)와 모의 시험으로 정한 값이다 — 실제 녹음으로 다듬어야 한다. */
+  DIAR: { WIN: 2.0, HOP: 1.5, MAX_WIN: 6, MIN_EMB_SEC: 0.5, RELIABLE_SEC: 1.5, MIN_SPK_SEC: 10, T_SAME: 0.86, T_MERGE: 0.8, T_FLOOR: 0.55, T_ASSIGN: 0.5, MARGIN: 0.1, CTX_GAP: 1.5 },
+  unit(v) { let s = 0; for (const x of v) s += x * x; s = Math.sqrt(s) || 1; return Float32Array.from(v, (x) => x / s); },
+  dot(a, b) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; },
+  mean(vs) { const d = vs[0].length, m = new Float32Array(d); for (const v of vs) for (let i = 0; i < d; i++) m[i] += v[i]; return STT.unit(m); },
+  /* 평균 연결 군집화의 모든 단계(병합 순서와 그때의 유사도) */
+  dendrogram(V, w) {
+    let cl = V.map((_, i) => ({ m: [i] }));
+    const S = V.map((a) => V.map((b) => STT.dot(a, b)));
+    const link = (A, B) => { let s = 0; for (const i of A.m) for (const j of B.m) s += S[i][j]; return s / (A.m.length * B.m.length); };
+    const parts = new Map([[cl.length, cl.map((c) => c.m.slice())]]), sims = new Map();
+    while (cl.length > 1) {
+      let bi = 0, bj = 1, bv = -Infinity;
+      for (let i = 0; i < cl.length; i++) for (let j = i + 1; j < cl.length; j++) { const v = link(cl[i], cl[j]); if (v > bv) { bv = v; bi = i; bj = j; } }
+      cl[bi] = { m: cl[bi].m.concat(cl[bj].m) }; cl.splice(bj, 1);
+      parts.set(cl.length, cl.map((c) => c.m.slice())); sims.set(cl.length, bv); // sims[k] = k+1개 → k개로 합칠 때의 유사도
+    }
+    return { parts, sims, S };
+  },
+  silhouette(S, groups) {
+    if (groups.length < 2) return -1;
+    const lab = new Map(); groups.forEach((g, gi) => g.forEach((i) => lab.set(i, gi)));
+    let tot = 0, n = 0;
+    for (const [i, gi] of lab) {
+      const own = groups[gi]; if (own.length < 2) { n++; continue; }
+      const a = own.reduce((s, j) => s + (j === i ? 0 : 1 - S[i][j]), 0) / (own.length - 1);
+      let b = Infinity; groups.forEach((g, gj) => { if (gj !== gi) b = Math.min(b, g.reduce((s, j) => s + 1 - S[i][j], 0) / g.length); });
+      tot += (b - a) / Math.max(a, b, 1e-9); n++;
+    }
+    return tot / n;
+  },
+  /**
+   * segs: [{start,end}] / embed(start,end) → 특징 벡터 / speech(start,end) → 말소리 초
+   * expected: 예상 화자 수(없으면 자동). 결과: 발화별 {speaker|null, status: ok|context|uncertain|overlap, conf, overlapWith}
+   */
+  async diarize(segs, { embed, speech, expected = null, onProgress = () => { }, isCancelled = () => false }) {
+    const D = STT.DIAR, n = segs.length, info = segs.map((g) => ({ speech: speech(g.start, g.end), wins: [], vec: null }));
+    // 1) 창 단위 특징
+    const jobs = [];
+    segs.forEach((g, i) => {
+      if (info[i].speech < D.MIN_EMB_SEC) return;                          // 너무 짧으면 특징을 재지 않음
+      const len = g.end - g.start;
+      if (len <= D.WIN + 0.25) { jobs.push([i, g.start, g.end]); return; }
+      let starts = []; for (let t = g.start; t + D.WIN <= g.end + 0.01; t += D.HOP) starts.push(t);
+      if (starts.length > D.MAX_WIN) starts = Array.from({ length: D.MAX_WIN }, (_, k) => starts[Math.round(k * (starts.length - 1) / (D.MAX_WIN - 1))]);
+      starts.forEach((t) => jobs.push([i, t, Math.min(g.end, t + D.WIN)]));
+    });
+    for (let j = 0; j < jobs.length; j++) {
+      if (isCancelled()) throw Object.assign(new Error("자동 전사를 중단했습니다. 회의록은 바뀌지 않았습니다."), { cancelled: true });
+      onProgress(j, jobs.length);
+      const [i, a, b] = jobs[j];
+      if (speech(a, b) < D.MIN_EMB_SEC * 0.8) continue;                    // 창 안이 거의 침묵이면 건너뜀
+      info[i].wins.push(STT.unit(await embed(a, b)));
+    }
+    info.forEach((x) => { if (x.wins.length) x.vec = STT.mean(x.wins); });
+    const reliable = info.map((x, i) => (x.vec && x.speech >= D.RELIABLE_SEC ? i : -1)).filter((i) => i >= 0);
+    const warnings = [], stats = { segments: n, reliable: reliable.length, expected, windows: jobs.length };
+    const out = segs.map(() => ({ speaker: null, status: "uncertain", conf: 0, overlapWith: null }));
+    if (!reliable.length) {
+      warnings.push("화자를 판단할 만큼 긴 발화가 없어 모든 발화를 ‘화자 미확정’으로 두었습니다.");
+      return { labels: out, speakers: [], warnings, stats };
+    }
+    // 2) 믿을 만한 발화로 화자 묶기
+    const V = reliable.map((i) => info[i].vec), sp = reliable.map((i) => info[i].speech);
+    const { parts, sims, S } = STT.dendrogram(V);
+    const secOf = (g) => g.reduce((s, k) => s + sp[k], 0);
+    // 화자로 인정할 최소 말소리: 전체 판단 가능 말소리의 10%(3~10초). 짧은 회의에서도 두 사람을 하나로 합치지 않도록 녹음 길이에 맞춤
+    const minSpk = Math.min(D.MIN_SPK_SEC, Math.max(3, 0.1 * sp.reduce((a, b) => a + b, 0)));
+    stats.minSpeakerSec = Math.round(minSpk * 10) / 10;
+    const big = (g) => secOf(g) >= minSpk && g.length >= 2;
+    let groups;
+    if (expected) {
+      const k = Math.min(expected, V.length);
+      // 잡음·짧은 조각 같은 작은 묶음은 예상 수에 세지 않는다(작은 묶음이 자리를 차지해 실제 두 사람이 합쳐지는 것 방지)
+      let kk = k;
+      while (kk < V.length && parts.get(kk).filter(big).length < k) kk++;
+      groups = parts.get(kk);
+      // 예상 수로 맞추려다 뚜렷이 다른 목소리(충분한 분량)를 합치게 되면 합치지 않는다
+      while (kk < V.length && sims.get(kk) < D.T_FLOOR) {
+        const finer = parts.get(kk + 1);
+        if (finer.filter(big).length <= groups.filter(big).length) break;  // 더 나눠도 충분한 화자가 늘지 않음(작은 조각) → 그대로
+        kk++; groups = finer;
+      }
+      if (groups.filter(big).length > expected)
+        warnings.push(`예상 화자 수(${expected}명)보다 많은 목소리가 감지되었습니다. 실제로 말한 사람이 더 있었는지 확인하세요. 목소리가 뚜렷이 달라 억지로 합치지 않았습니다.`);
+      if (sims.has(k)) stats.lastMergeSim = Math.round(sims.get(k) * 100) / 100; // 예상 수로 맞출 때 마지막으로 합친 두 묶음의 유사도
+    } else {
+      // 자동: 충분한 분량의 화자만 세어 실루엣 점수가 가장 좋은 수
+      let best = null;
+      for (let k = 2; k <= Math.min(8, V.length); k++) {
+        const g = parts.get(k).filter(big);
+        if (g.length < 2) continue;
+        const sc = STT.silhouette(S, g);
+        if (!best || sc > best.sc + 0.02) best = { k, sc, g };
+      }
+      let autoK = 1;
+      if (!best) {
+        // 충분한 묶음이 둘 이상 안 나오는 짧은 녹음: 뚜렷이 다른 목소리를 합쳐야 했던 단계(유사도 < T_FLOOR) 앞에서 멈춘다
+        for (let k = 1; k < V.length; k++) if (sims.get(k) < D.T_FLOOR) autoK = k + 1;
+        stats.autoFallbackK = autoK;
+      }
+      groups = best ? parts.get(best.k) : parts.get(autoK);
+      if (best) {
+        const cents = best.g.map((g) => STT.mean(g.map((k) => V[k])));
+        let maxSim = -1; for (let a = 0; a < cents.length; a++) for (let b = a + 1; b < cents.length; b++) maxSim = Math.max(maxSim, STT.dot(cents[a], cents[b]));
+        if (best.g.length === 2 && maxSim >= D.T_SAME) groups = [V.map((_, i) => i)];  // 둘이 사실상 같은 목소리 → 1명
+        stats.autoSilhouette = Math.round(best.sc * 100) / 100;
+      }
+      warnings.push("참석자 수를 ‘자동’으로 추정했습니다. 실제 참석자 수를 알면 직접 고르는 편이 더 정확합니다.");
+    }
+    // 3) 분량이 모자란 묶음은 화자로 인정하지 않음(그 발화들은 아래에서 다시 판단)
+    let spk = groups.filter(big);
+    // 충분한 묶음이 없으면(아주 짧은 녹음) 합치지 말고 말소리가 많은 묶음을 예상 수만큼 그대로 둔다
+    if (!spk.length || (!expected && stats.autoFallbackK > spk.length)) {
+      const keep = groups.filter((g) => secOf(g) >= 3).sort((a, b) => secOf(b) - secOf(a)).slice(0, expected || stats.autoFallbackK || 1);
+      spk = keep.length ? keep : [groups.slice().sort((a, b) => secOf(b) - secOf(a))[0]];
+      if (spk.length > 1) warnings.push("녹음이 짧아 화자별 근거가 적습니다. 화자 구분 신뢰도가 낮으니 녹음과 대조하세요.");
+    }
+    // 3-1) 같은 사람이 말투(감정·음량·거리)만 바뀌어 갈라진 묶음: 중심이 아주 비슷하면 합친다.
+    //      예상 수가 있으면 그 수 아래로는 합치지 않는다(서로 다른 사람을 수 맞추려고 합치지 않는 것과 같은 원칙).
+    stats.mergedSplits = 0;
+    for (;;) {
+      if (spk.length < 2 || (expected && spk.length <= expected)) break;
+      const cs = spk.map((g) => STT.mean(g.map((k) => V[k])));
+      let bi = -1, bj = -1, bv = -1;
+      for (let a = 0; a < cs.length; a++) for (let b = a + 1; b < cs.length; b++) { const v = STT.dot(cs[a], cs[b]); if (v > bv) { bv = v; bi = a; bj = b; } }
+      if (bv < D.T_MERGE) break;
+      spk[bi] = spk[bi].concat(spk[bj]); spk.splice(bj, 1); stats.mergedSplits++;
+    }
+    if (stats.mergedSplits) warnings.push(`목소리가 매우 비슷한 묶음 ${stats.mergedSplits}개를 같은 사람(말투·음량·마이크 거리 변화)으로 보고 합쳤습니다.`);
+    if (expected && spk.length > expected && !warnings.some((w) => /많은 목소리/.test(w)))
+      warnings.push(`예상 화자 수(${expected}명)보다 많은 목소리가 감지되었습니다. 실제로 말한 사람이 더 있었는지 확인하세요. 목소리가 뚜렷이 달라 억지로 합치지 않았습니다.`);
+    let cents = spk.map((g) => STT.mean(g.map((k) => V[k])));
+    // 4) 겹침 찾기 → 중심 다시 계산(겹침 제외) → 모든 발화 다시 배정
+    const nearest = (v) => { const s = cents.map((c) => STT.dot(v, c)); const o = s.map((x, i) => [x, i]).sort((a, b) => b[0] - a[0]); return { best: o[0][1], s1: o[0][0], s2: o.length > 1 ? o[1][0] : -1 }; };
+    const overlapOf = (i) => {
+      const w = info[i].wins; if (w.length < 2 || cents.length < 2) return null;
+      const cnt = new Map(); for (const v of w) { const r = nearest(v); if (r.s1 - r.s2 >= D.MARGIN) cnt.set(r.best, (cnt.get(r.best) || 0) + 1); }
+      const top = [...cnt.entries()].filter(([, c]) => c / w.length >= 1 / 3);
+      return top.length >= 2 ? top.map(([s]) => s) : null;
+    };
+    for (let pass = 0; pass < 2; pass++) {
+      const members = cents.map(() => []);
+      reliable.forEach((i, k) => { if (overlapOf(i)) return; const r = nearest(V[k]); if (r.s1 - r.s2 >= D.MARGIN || cents.length === 1) members[r.best].push(V[k]); });
+      cents = cents.map((c, ci) => (members[ci].length ? STT.mean(members[ci]) : c));
+    }
+    const confOf = (r) => Math.max(0, Math.min(1, cents.length === 1 ? (r.s1 - D.T_MERGE) / (1 - D.T_MERGE) : (r.s1 - r.s2) / 0.3));
+    info.forEach((x, i) => {
+      if (!x.vec) return;
+      const ov = x.speech >= D.RELIABLE_SEC ? overlapOf(i) : null;
+      if (ov) { out[i] = { speaker: null, status: "overlap", conf: 0, overlapWith: ov.map((s) => s + 1) }; return; }
+      const r = nearest(x.vec);
+      // 화자가 하나뿐이면 ‘두 번째 후보와의 차이’를 쓸 수 없어 훨씬 닮아야 배정(다른 사람의 짧은 말을 잘못 붙이지 않게)
+      const ok = cents.length === 1 ? r.s1 >= D.T_MERGE : r.s1 >= D.T_ASSIGN && r.s1 - r.s2 >= D.MARGIN;
+      if (ok) out[i] = { speaker: r.best + 1, status: "ok", conf: confOf(r), overlapWith: null, sim: r.s1 };
+      else out[i] = { speaker: null, status: "uncertain", conf: 0, overlapWith: null, sim: r.s1, cand: r.best + 1 };
+    });
+    // 5) 애매한 발화: 바로 앞뒤 발화가 같은 화자이고 그 화자가 후보와 맞거나 거의 비슷하면 문맥으로 배정
+    for (let i = 0; i < n; i++) {
+      if (out[i].status !== "uncertain") continue;
+      const p = out[i - 1], q = out[i + 1];
+      const near = (j) => j >= 0 && j < n && Math.abs((j < i ? segs[i].start - segs[j].end : segs[j].start - segs[i].end)) <= D.CTX_GAP;
+      if (p && q && p.status === "ok" && q.status === "ok" && p.speaker === q.speaker && near(i - 1) && near(i + 1) && (!out[i].cand || out[i].cand === p.speaker || !info[i].vec))
+        out[i] = { speaker: p.speaker, status: "context", conf: 0.3, overlapWith: null };
+    }
+    // 6) 화자 번호를 처음 말한 순서로, 통계·경고
+    const order = new Map(); out.forEach((o) => { if (o.speaker && !order.has(o.speaker)) order.set(o.speaker, order.size + 1); });
+    const ren = (s) => order.get(s) ?? s;
+    out.forEach((o) => { if (o.speaker) o.speaker = ren(o.speaker); if (o.overlapWith) o.overlapWith = o.overlapWith.map(ren).sort(); });
+    const speakers = [...order.values()].map((id) => {
+      const mine = out.map((o, i) => [o, i]).filter(([o]) => o.speaker === id);
+      return { id, segments: mine.length, speechSec: Math.round(mine.reduce((s, [, i]) => s + info[i].speech, 0)), conf: Math.round(mine.reduce((s, [o]) => s + o.conf, 0) / Math.max(1, mine.length) * 100) / 100 };
+    });
+    stats.found = speakers.length;
+    stats.uncertain = out.filter((o) => o.status === "uncertain").length;
+    stats.overlap = out.filter((o) => o.status === "overlap").length;
+    stats.context = out.filter((o) => o.status === "context").length;
+    stats.minorDropped = groups.length - spk.length;
+    if (stats.minorDropped) warnings.push(`근거가 짧은 목소리 묶음 ${stats.minorDropped}개는 새 화자로 만들지 않았습니다(말소리 ${stats.minSpeakerSec}초 미만). 해당 발화는 가장 닮은 화자에 배정하거나 ‘화자 미확정’으로 두었습니다.`);
+    if (stats.uncertain) warnings.push(`짧거나 애매해 화자를 정하지 못한 발화 ${stats.uncertain}개는 ‘화자 미확정’으로 표시했습니다. 녹음을 듣고 직접 고치세요.`);
+    if (stats.overlap) warnings.push(`두 사람의 목소리가 함께 들리는 발화 ${stats.overlap}개는 ‘겹침’으로 표시했습니다(한 사람으로 추측하지 않음).`);
+    const low = speakers.filter((s) => s.conf < 0.4);
+    if (low.length) warnings.push(`${low.map((s) => `화자 ${s.id}`).join(", ")}의 구분 신뢰도가 낮습니다. 목소리가 비슷하거나 녹음 상태가 좋지 않을 수 있습니다.`);
+    return { labels: out, speakers, warnings, stats };
+  },
   clipFor(x, start, end, sr = STT.SR) {
     let a = Math.round(start * sr), b = Math.round(end * sr);
     if (b - a < sr) { const c = (a + b) >> 1; a = c - (sr >> 1); b = a + sr; }
@@ -1403,13 +1601,15 @@ const STT = {
     const out = [];
     for (const g of segs) {
       const p = out[out.length - 1];
-      if (p && p.speaker === g.speaker && g.start - p.end < 2 && g.end - p.start < 90) { p.text += " " + g.text; p.end = g.end; }
+      const solid = (z) => z.speaker != null && (z.status === undefined || z.status === "ok" || z.status === "context");
+      if (p && solid(p) && solid(g) && p.speaker === g.speaker && g.start - p.end < 2 && g.end - p.start < 90) { p.text += " " + g.text; p.end = g.end; p.conf = Math.min(p.conf ?? 1, g.conf ?? 1); }
       else out.push({ ...g });
     }
     return out;
   },
   toText(segs, speakerName) {
-    return segs.map((g) => `[${hms(Math.floor(g.start))}] ${g.speaker ? speakerName(g.speaker) + ": " : ""}${g.text}`).join("\n");
+    const label = (g) => g.status === "overlap" ? `겹침(${(g.overlapWith || []).map(speakerName).join("·")})` : g.status === "uncertain" ? UNCERTAIN : g.speaker ? speakerName(g.speaker) : null;
+    return segs.map((g) => { const l = label(g); return `[${hms(Math.floor(g.start))}] ${l ? l + ": " : ""}${g.text}`; }).join("\n");
   },
 
   async run(m, blob, opt, onProgress) {
@@ -1446,33 +1646,54 @@ const STT = {
       segs = STT.cleanSegments(segs, rms, thr, diag);
       diag.device = eng.device; diag.dtype = eng.dtype; diag.fellBack = !!eng.fellBack;
       if (!segs.length) throw Object.assign(new Error("녹음에서 말소리를 받아쓰지 못했습니다. 아래 진단 정보를 확인하세요."), { diag });
-      let nSpk = 1;
+      let nSpk = 1, diar = null;
       if (opt.speakers !== 1 && segs.length > 1) {
-        const vecs = [];
-        for (let i = 0; i < segs.length; i++) {
-          if (STT.cancel) throw stop();
-          onProgress({ phase: "spk", done: i, total: segs.length });
-          vecs.push(await eng.embed(STT.clipFor(x, segs[i].start, segs[i].end)));
-        }
-        const lab = STT.cluster(vecs, opt.speakers || null);
-        segs.forEach((g, i) => (g.speaker = lab[i]));
-        nSpk = Math.max(...lab);
-      } else segs.forEach((g) => (g.speaker = 1));
+        const SR = STT.SR;
+        const r = await STT.diarize(segs, {
+          embed: (a, b) => eng.embed(x.slice(Math.max(0, Math.round(a * SR)), Math.min(x.length, Math.round(b * SR)))),
+          speech: (a, b) => STT.speechFraction(rms, Math.floor(a / 0.02), Math.ceil(b / 0.02), thr) * Math.max(0, b - a),
+          expected: opt.speakers || null,
+          onProgress: (done, total) => onProgress({ phase: "spk", done, total }),
+          isCancelled: () => STT.cancel,
+        });
+        segs.forEach((g, i) => Object.assign(g, r.labels[i]));
+        nSpk = r.speakers.length;
+        diar = { expected: opt.speakers || null, speakers: r.speakers.map((x) => ({ ...x, name: `화자 ${x.id}` })), warnings: r.warnings, stats: r.stats, version: 2 };
+      } else segs.forEach((g) => { g.speaker = 1; g.status = "ok"; g.conf = 1; });
       const merged = STT.merge(segs);
-      return { segments: merged, speakers: nSpk, device: eng.device, model: eng.model, seconds: (performance.now() - t0) / 1000, audioSec: dur, diag };
+      return { segments: merged, speakers: nSpk, diar, device: eng.device, model: eng.model, seconds: (performance.now() - t0) / 1000, audioSec: dur, diag };
     } finally { STT.running = false; }
   },
 };
 
 /* 회의록 줄에서 화자 이름 찾기: "[00:00:05] 화자 1: 내용" 또는 "화자 1: 내용" */
-const SPEAKER_LINE = /^(\[\d{2}:\d{2}:\d{2}\]\s*)?([^:\[\]\n]{1,20}):\s/;
+const SPEAKER_LINE = /^(\[\d{2}:\d{2}:\d{2}\]\s*)?([^:\[\]\n]{1,40}):\s/;
+const UNCERTAIN = "화자 미확정";
+/* ‘화자 미확정’, ‘겹침(…)’은 사람 이름이 아니라 표시이므로 이름 바꾸기 목록·발언 비중에서 뺀다 */
+const isSpecialSpeaker = (n) => n === UNCERTAIN || /^겹침\(/.test(n);
 function speakersInText(text) {
   const c = new Map();
   for (const line of cleanText(text).split("\n")) { const mm = line.match(SPEAKER_LINE); if (mm) { const n = mm[2].trim(); c.set(n, (c.get(n) || 0) + 1); } }
   return [...c.entries()].map(([name, count]) => ({ name, count }));
 }
 function renameSpeaker(text, from, to) {
-  return text.split("\n").map((line) => { const mm = line.match(SPEAKER_LINE); return mm && mm[2].trim() === from ? (mm[1] || "") + to + ": " + line.slice(mm[0].length) : line; }).join("\n");
+  return text.split("\n").map((line) => {
+    const mm = line.match(SPEAKER_LINE); if (!mm) return line;
+    const name = mm[2].trim(), head = mm[1] || "", rest = line.slice(mm[0].length);
+    if (name === from) return head + to + ": " + rest;
+    const ov = name.match(/^겹침\((.*)\)$/);                           // 겹침 표시 안의 이름도 함께 바꿈
+    if (ov) { const ns = ov[1].split("·").map((x) => (x === from ? to : x)); return head + `겹침(${[...new Set(ns)].join("·")})` + ": " + rest; }
+    return line;
+  }).join("\n");
+}
+/* 이름을 바꾸거나 합치면 화자 분리 통계에도 같은 이름을 반영 */
+function renameDiar(diar, from, to) {
+  if (!diar || !diar.speakers) return diar;
+  const sp = []; for (const x of diar.speakers.map((y) => ({ ...y, name: y.name === from ? to : y.name }))) {
+    const e = sp.find((y) => y.name === x.name);
+    if (e) { const n = e.segments + x.segments; e.conf = Math.round((e.conf * e.segments + x.conf * x.segments) / Math.max(1, n) * 100) / 100; e.segments = n; e.speechSec += x.speechSec; e.merged = true; } else sp.push(x);
+  }
+  return { ...diar, speakers: sp };
 }
 function transcriptMethod(t) {
   if (!t || t.source !== "auto") return "직접 입력";
@@ -1480,13 +1701,14 @@ function transcriptMethod(t) {
 }
 function txtFile(m) {
   const t = m.transcript, s = new Date(m.startedAt);
-  const sp = speakersInText(t.text);
+  const all = speakersInText(t.text), sp = all.filter((x) => !isSpecialSpeaker(x.name)), spx = all.filter((x) => isSpecialSpeaker(x.name));
   const head = [
     `[${cleanLine(typeName(m.typeId))}] 회의록`,
     `일시: ${krDate(s)} ${fmtTime(m.startedAt)} – ${fmtTime(m.endedAt)}`,
     `녹음 시간: ${hms(m.durationSec)}`,
     m.analysis?.title ? `회의 제목: ${cleanLine(m.analysis.title)}` : null,
     sp.length ? `발언자: ${sp.map((x) => `${x.name}(${x.count}회)`).join(", ")}` : null,
+    spx.length ? `화자를 정하지 않은 줄: ${spx.map((x) => `${x.name} ${x.count}줄`).join(", ")} — 녹음을 듣고 확인하세요` : null,
     `작성: ${transcriptMethod(t)}`,
     t.source === "auto" ? "※ 자동 인식 결과입니다. 받아쓰기·화자 구분에 오류가 있을 수 있으니 녹음과 대조하세요. ‘화자 N’은 목소리로 나눈 번호이며 실제 이름이 아닙니다." : null,
     "─".repeat(30), "",
@@ -1540,9 +1762,10 @@ async function startStt(m) {
     const fresh = await DB.get(m.id);
     if (!fresh) throw new Error("작업 중 회의가 삭제되었습니다.");
     const now = new Date().toISOString();
-    fresh.transcript = { text, editedAt: now, source: "auto", model: r.model.split("/").pop(), device: r.device, speakers: r.speakers, autoHash: hashText(text), autoAt: now, diag: r.diag };
+    fresh.transcript = { text, editedAt: now, source: "auto", model: r.model.split("/").pop(), device: r.device, speakers: r.speakers, diar: r.diar, autoHash: hashText(text), autoAt: now, diag: r.diag };
     await DB.put(fresh);
-    STT.last = { id: m.id, done: `자동 전사를 마쳤습니다: ${r.segments.length}개 발언, 화자 ${r.speakers}명, 녹음 ${hms(r.audioSec)}을 ${hms(r.seconds)}에 처리(${r.device === "webgpu" ? "그래픽 가속" : "CPU"}). 녹음과 대조해 확인하세요.` };
+    const ds = r.diar?.stats;
+    STT.last = { id: m.id, done: `자동 전사를 마쳤습니다: ${r.segments.length}개 발언, 화자 ${r.speakers}명${ds && (ds.uncertain || ds.overlap) ? `(화자 미확정 ${ds.uncertain}개·겹침 ${ds.overlap}개)` : ""}, 녹음 ${hms(r.audioSec)}을 ${hms(r.seconds)}에 처리(${r.device === "webgpu" ? "그래픽 가속" : "CPU"}). 녹음과 대조해 확인하세요.` };
     toast("자동 전사를 마쳤습니다.");
   } catch (e) {
     STT.last = { id: m.id, error: e.message || String(e), cancelled: !!e.cancelled, diag: e.diag || null };
@@ -1556,12 +1779,12 @@ function txtPreviewHtml(m) {
   const lines = txtFile(m).replace(/\r/g, "").replace(/\n$/, "").split("\n");
   const sep = lines.findIndex((l) => /^─+$/.test(l));
   const head = sep >= 0 ? lines.slice(0, sep) : [], body = sep >= 0 ? lines.slice(sep + 1) : lines;
-  const order = speakersInText(m.transcript.text).map((x) => x.name);
+  const order = speakersInText(m.transcript.text).filter((x) => !isSpecialSpeaker(x.name)).map((x) => x.name);
   const row = (line) => {
     const mm = line.match(SPEAKER_LINE);
     if (!mm) return `<div class="tl">${esc(line) || "&nbsp;"}</div>`;
     const i = Math.max(0, order.indexOf(mm[2].trim())) % SPK_COLORS;
-    return `<div class="tl">${mm[1] ? `<span class="ts">${esc(mm[1].trim())}</span> ` : ""}<span class="spk c${i}">${esc(mm[2].trim())}</span> ${esc(line.slice(mm[0].length))}</div>`;
+    return `<div class="tl">${mm[1] ? `<span class="ts">${esc(mm[1].trim())}</span> ` : ""}<span class="spk ${isSpecialSpeaker(mm[2].trim()) ? "cx" : "c" + i}">${esc(mm[2].trim())}</span> ${esc(line.slice(mm[0].length))}</div>`;
   };
   return `<div class="txt-view" data-testid="txt-view"><div class="txt-headlines">${head.map((l) => `<div>${esc(l)}</div>`).join("")}</div>${body.map(row).join("")}</div>`;
 }
@@ -1586,12 +1809,13 @@ function sttBoxHtml(o, runningHere, mine) {
   return `<div class="stt-box">
       <div class="stt-opts">
         <label><span class="small muted">정확도</span><select id="stt-model" ${STT.running ? "disabled" : ""}>${Object.entries(STT.MODELS).map(([k, v]) => `<option value="${k}" ${o.model === k ? "selected" : ""}>${esc(v.label)}</option>`).join("")}</select></label>
-        <label><span class="small muted">참석자 수</span><select id="stt-spk" ${STT.running ? "disabled" : ""}>
+        <label><span class="small muted">참석자 수(예상)</span><select id="stt-spk" ${STT.running ? "disabled" : ""}>
           <option value="0" ${!o.speakers ? "selected" : ""}>자동으로 추정</option>
           <option value="1" ${o.speakers === 1 ? "selected" : ""}>1명 (화자 구분 안 함)</option>
           ${[2, 3, 4, 5, 6, 7, 8].map((n) => `<option value="${n}" ${o.speakers === n ? "selected" : ""}>${n}명</option>`).join("")}</select></label>
         <label class="chk"><input type="checkbox" id="stt-gpu" ${o.gpu ? "checked" : ""} ${STT.running ? "disabled" : ""}> 그래픽 가속(WebGPU) 사용</label>
       </div>
+      <p class="small muted" style="margin:6px 0 0">참석자 수를 알면 꼭 고르세요. 고르면 그 수를 기준으로 목소리를 묶되, 뚜렷이 다른 목소리가 충분히(전체 말소리의 10%, 3~${STT.DIAR.MIN_SPK_SEC}초 이상) 있으면 억지로 합치지 않고 경고합니다. ‘자동’은 말소리가 충분한 목소리만 세어 추정합니다. 짧거나 애매한 발화는 ‘화자 미확정’, 함께 말한 부분은 ‘겹침’으로 남깁니다.</p>
       <div class="row" style="margin-top:10px">
         <button class="btn primary" id="stt-start" ${STT.running ? "disabled" : ""}>자동 전사 시작</button>
         <button class="btn" id="stt-cancel" ${runningHere ? "" : "hidden"}>중단</button>
@@ -1606,11 +1830,26 @@ function sttBoxHtml(o, runningHere, mine) {
     </div>`;
 }
 
+/* 화자 분리 결과(신뢰도·경고) */
+function diarHtml(t) {
+  const d = t.diar, st = d.stats || {};
+  const lv = (c) => (c >= 0.7 ? ["높음", "ok"] : c >= 0.4 ? ["보통", "review"] : ["낮음", "review"]);
+  const warn = (d.warnings || []).filter((w) => !/자동’으로 추정/.test(w) || !d.expected);
+  return `<details class="privacy" data-testid="diar" ${warn.length > 1 || (d.warnings || []).some((w) => /많은 목소리|신뢰도가 낮/.test(w)) ? "open" : ""}><summary>화자 분리 결과 — ${d.expected ? `예상 ${d.expected}명` : "자동 추정"} → ${(d.speakers || []).length}명${st.uncertain ? ` · 미확정 ${st.uncertain}` : ""}${st.overlap ? ` · 겹침 ${st.overlap}` : ""}</summary>
+    <table class="diar-t"><tr><th>화자</th><th>발언</th><th>말소리</th><th>구분 신뢰도</th></tr>
+      ${(d.speakers || []).map((x) => { const [l, c] = lv(x.conf); return `<tr><td>${esc(x.name)}${x.merged ? " (합침)" : ""}</td><td>${x.segments}개</td><td>${fmtDur(x.speechSec * 1000)}</td><td><span class="badge ${c}">${l}</span> ${Math.round(x.conf * 100)}%</td></tr>`; }).join("")}</table>
+    <p class="small muted">판단에 쓴 발화 ${st.reliable ?? "-"}/${st.segments ?? "-"}개(말소리 ${STT.DIAR.RELIABLE_SEC}초 이상)${st.context ? ` · 앞뒤 발화로 정한 것 ${st.context}개` : ""}${st.lastMergeSim != null ? ` · 예상 수로 맞출 때 마지막 병합 유사도 ${st.lastMergeSim}` : ""}${st.autoSilhouette != null ? ` · 자동 추정 분리도 ${st.autoSilhouette}` : ""}</p>
+    ${warn.length ? `<ul class="small">${warn.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
+    <p class="small muted">구분 신뢰도는 가장 닮은 화자와 두 번째로 닮은 화자의 차이로 계산합니다. ‘화자 N’은 목소리로 나눈 번호이며, 같은 사람으로 확인되면 이름 바꾸기로 같은 이름을 넣어 합칠 수 있습니다.</p></details>`;
+}
+const fmtDur = (ms) => RH.fmtDur(ms);
+
 function renderTranscriptCard(el, m) {
   const t = m.transcript && norm(m.transcript.text) ? m.transcript : null, o = sttOpts();
   const mine = STT.last && STT.last.id === m.id ? STT.last : null;
   const runningHere = !!(STT.running && mine && mine.p);
-  const sp = t ? speakersInText(t.text) : [];
+  const spAll = t ? speakersInText(t.text) : [];
+  const sp = spAll.filter((x) => !isSpecialSpeaker(x.name)), spSpecial = spAll.filter((x) => isSpecialSpeaker(x.name));
   const status = runningHere ? `<div class="stt-run"><span>${esc(sttProgressText(mine.p))}</span></div>`
     : STT.running ? `<div class="alert warn">다른 회의의 자동 전사가 진행 중입니다. 끝난 뒤 시작하세요.</div>`
     : mine?.error ? `<div class="alert ${mine.cancelled ? "warn" : "err"}" role="alert">${esc(mine.error)}</div>`
@@ -1627,7 +1866,9 @@ function renderTranscriptCard(el, m) {
       ${txtPreviewHtml(m)}
       ${sp.length ? `<div class="spk-box"><h3>화자 이름 바꾸기</h3><p class="small muted">‘화자 1’ 같은 이름을 회의록 전체에서 한꺼번에 바꾸고 바로 저장합니다. 녹음을 들어 확인한 이름만 넣으세요.</p>
         ${sp.map((x, i) => `<div class="rename"><span class="small">${x.count}회</span><span class="spk c${i % SPK_COLORS}">${esc(x.name)}</span><span class="row" style="flex-wrap:nowrap"><input type="text" maxlength="20" data-spk="${i}" placeholder="새 이름" aria-label="${esc(x.name)}의 새 이름"><button class="btn small" data-spk-apply="${i}">바꾸기</button></span></div>`).join("")}
+        ${spSpecial.length ? `<p class="small muted" data-testid="spk-special">${spSpecial.map((x) => `‘${esc(x.name)}’ ${x.count}줄`).join(", ")}은(는) 화자를 추측하지 않고 남겨 둔 줄입니다. 녹음을 듣고 ‘고치기’에서 화자를 적어 주세요. 이름을 바꾸면 겹침 표시 안의 이름도 함께 바뀝니다.</p>` : ""}
         <div id="spk-msg"></div></div>` : ""}
+      ${t.diar ? diarHtml(t) : ""}
       ${t.diag && !mine?.diag ? diagHtml(t.diag, false) : ""}` : `<p class="muted" style="margin-top:12px">아직 회의록이 없습니다. 아래 ‘자동 전사 시작’으로 녹음을 글자로 바꾸거나 직접 입력하세요.</p>`}
     ${t ? `<details class="sec" id="stt-more" ${runningHere ? "open" : ""}><summary>자동 전사 ${t.source === "auto" ? "다시 하기" : "하기"} (화자 구분)</summary>${sttBoxHtml(o, runningHere, mine)}</details>` : sttBoxHtml(o, runningHere, mine)}
     <details class="sec" id="edit-box" ${editOpen ? "open" : ""}><summary>회의록 직접 고치기·입력</summary>
@@ -1669,7 +1910,7 @@ function renderTranscriptCard(el, m) {
       return;
     }
     el.dataset.mergeOk = "";
-    m.transcript = { ...m.transcript, text: renameSpeaker(m.transcript.text, from, to), editedAt: new Date().toISOString() };
+    m.transcript = { ...m.transcript, text: renameSpeaker(m.transcript.text, from, to), diar: renameDiar(m.transcript.diar, from, to), editedAt: new Date().toISOString() };
     try { await DB.put(m); toast(`‘${from}’을(를) ‘${to}’(으)로 바꿨습니다.`); render(); }
     catch (e) { msg.innerHTML = `<div class="alert err">저장하지 못했습니다: ${esc(e.message || e)}</div>`; }
   });
@@ -2283,7 +2524,7 @@ const SUM = {
     const top = list.filter((t) => !t.other);
     const kwList = top.map((t) => t.key);
     // 발언 비중(화자가 있으면)
-    const spk = new Map(); sents.forEach((s) => { if (s.speaker) spk.set(s.speaker, (spk.get(s.speaker) || 0) + s.clean.length); });
+    const spk = new Map(); sents.forEach((s) => { if (s.speaker && !isSpecialSpeaker(s.speaker)) spk.set(s.speaker, (spk.get(s.speaker) || 0) + s.clean.length); });
     const totalLen = [...spk.values()].reduce((a, b) => a + b, 0);
     const speakers = [...spk.entries()].sort((a, b) => b[1] - a[1]).map(([n, l]) => ({ name: n, share: Math.round(l / totalLen * 100) }));
     const summary = top.length
