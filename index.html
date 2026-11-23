@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>회의록 분석 v3</title>
+<title>회의록 분석 v3.1</title>
 <style>
 :root{--bg:#f5f6f4;--card:#fff;--ink:#1d2421;--muted:#5d6a64;--line:#dde3df;--accent:#1f6b52;--accent-ink:#fff;--accent-bg:#e3f1eb;--warn:#8a5a00;--warn-bg:#fdf3dc;--bad:#b42323;--bad-bg:#fbe7e7;--rec:#d23b3b;--field:#fff;--mark:#ffe58a}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#131715;--card:#1b201e;--ink:#e6ebe8;--muted:#9aa7a1;--line:#2e3633;--accent:#6fc9a6;--accent-ink:#0f1a15;--accent-bg:#1d3a30;--warn:#f0c46a;--warn-bg:#3a2f16;--bad:#f08a8a;--bad-bg:#3d1f1f;--rec:#ff6b6b;--field:#141816;--mark:#6b5a13}}
@@ -148,6 +148,22 @@ details.sec .stt-box{margin-bottom:0}
 .brief li.sub,.dlist li.sub{list-style:none;color:var(--muted);margin-left:10px}
 .brief-dec{margin-top:6px;font-weight:700;color:var(--accent)}
 .dl-row{margin-top:12px}
+.health-panel{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.hs-grid{display:grid;gap:6px}
+.hs-row{display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px;font-size:14px;align-items:start}
+.hs-label{color:var(--muted)} .hs-value{font-weight:600}
+.hs-ok .hs-value{color:var(--accent)} .hs-warn .hs-value{color:var(--warn)} .hs-bad .hs-value{color:var(--bad)} .hs-muted .hs-value{color:var(--muted);font-weight:400}
+@media (max-width:480px){.hs-row{grid-template-columns:96px minmax(0,1fr)}}
+.return-check{border-radius:10px;padding:10px 14px;margin-bottom:12px;border-left:4px solid var(--accent);background:var(--accent-bg)}
+.return-check ul{margin:6px 0 8px;padding-left:18px;font-size:14px}
+.rc-warn{border-left-color:var(--warn);background:var(--warn-bg)} .rc-error{border-left-color:var(--bad);background:var(--bad-bg)}
+.health-report{margin:10px 0;padding:10px 12px;border-radius:10px;border:1px solid var(--line);font-size:14px}
+.health-report.is-warn{border-color:var(--warn);background:var(--warn-bg)}
+.health-report ul{margin:4px 0;padding-left:18px;white-space:pre-wrap}
+.pre-check{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:8px 14px;font-size:14px}
+.pre-check summary{cursor:pointer;font-weight:700;min-height:32px}
+.state.error .dot{background:var(--bad)}
+.recover{border-color:var(--warn)}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:30;max-width:90vw}
 #print-area{display:none}
 @media print{body>*:not(#print-area){display:none!important}#print-area{display:block!important;color:#000;font-size:11pt}#print-area table{border-collapse:collapse;width:100%}#print-area td,#print-area th{border:1px solid #444;padding:4px 6px;text-align:left}#print-area h1{text-align:center;font-size:18pt}#print-area h2{font-size:13pt;margin-top:18pt}.rv{color:#a15c00}}
@@ -155,7 +171,7 @@ details.sec .stt-box{margin-bottom:0}
 </head>
 <body>
 <header class="top"><div class="top-in">
-  <div class="brand">회의록 분석 <span class="badge">v3</span></div>
+  <div class="brand">회의록 분석 <span class="badge">v3.1</span></div>
   <nav class="tabs" aria-label="화면">
     <button data-tab="record" aria-current="page">녹음</button>
     <button data-tab="meetings">회의 기록</button>
@@ -220,12 +236,15 @@ const DB = {
     if (this.db) return this.db;
     this.db = await new Promise((res, rej) => {
       let r;
-      try { r = indexedDB.open("meeting-recorder-local", 1); } catch (e) { rej(e); return; }
+      try { r = indexedDB.open("meeting-recorder-local", 2); } catch (e) { rej(e); return; }
       r.onupgradeneeded = () => {
         const d = r.result;
-        d.createObjectStore("meetings", { keyPath: "id", autoIncrement: true });
-        d.createObjectStore("audio");
-        d.createObjectStore("settings");
+        if (!d.objectStoreNames.contains("meetings")) d.createObjectStore("meetings", { keyPath: "id", autoIncrement: true });
+        if (!d.objectStoreNames.contains("audio")) d.createObjectStore("audio");
+        if (!d.objectStoreNames.contains("settings")) d.createObjectStore("settings");
+        // v2: 녹음 중 1초 조각 임시 보관(탭 정지·종료 시 복구)
+        if (!d.objectStoreNames.contains("pending")) d.createObjectStore("pending", { keyPath: "sid" });
+        if (!d.objectStoreNames.contains("pendingChunks")) d.createObjectStore("pendingChunks", { keyPath: ["sid", "seq"] });
       };
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
@@ -256,6 +275,29 @@ const DB = {
   async clearAll() { return this.tx(["meetings", "audio"], "readwrite", (t) => { t.objectStore("meetings").clear(); t.objectStore("audio").clear(); }); },
   async getSetting(k) { return this.tx(["settings"], "readonly", (t) => this.req(t.objectStore("settings").get(k))); },
   async setSetting(k, v) { return this.tx(["settings"], "readwrite", (t) => this.req(t.objectStore("settings").put(v, k))); },
+  /* 녹음 조각 임시 보관 */
+  async pendingStart(meta) { return this.tx(["pending"], "readwrite", (t) => this.req(t.objectStore("pending").put(meta))); },
+  async pendingChunk(sid, seq, blob, elapsed) {
+    return this.tx(["pending", "pendingChunks"], "readwrite", (t) => {
+      t.objectStore("pendingChunks").put({ sid, seq, blob });
+      const ps = t.objectStore("pending"), g = ps.get(sid);
+      g.onsuccess = () => { const m = g.result; if (m) ps.put({ ...m, elapsed, bytes: m.bytes + blob.size, updatedAt: new Date().toISOString() }); };
+    });
+  },
+  async pendingStop(sid, elapsed) {
+    return this.tx(["pending"], "readwrite", (t) => { const ps = t.objectStore("pending"), g = ps.get(sid); g.onsuccess = () => { const m = g.result; if (m) ps.put({ ...m, elapsed, state: "stopped", updatedAt: new Date().toISOString() }); }; });
+  },
+  async pendingList() { return this.tx(["pending"], "readonly", (t) => this.req(t.objectStore("pending").getAll())); },
+  async pendingLoad(sid) {
+    const meta = await this.tx(["pending"], "readonly", (t) => this.req(t.objectStore("pending").get(sid)));
+    const ch = await this.tx(["pendingChunks"], "readonly", (t) => this.req(t.objectStore("pendingChunks").getAll(IDBKeyRange.bound([sid, 0], [sid, Number.MAX_SAFE_INTEGER]))));
+    if (!ch.length) return null;
+    ch.sort((x, y) => x.seq - y.seq);
+    return { blob: new Blob(ch.map((c) => c.blob), { type: (meta?.mime || ch[0].blob.type || "audio/webm").split(";")[0] }), missing: RH.missingSeqs(ch.map((c) => c.seq)), chunks: ch.length };
+  },
+  async pendingDelete(sid) {
+    return this.tx(["pending", "pendingChunks"], "readwrite", (t) => { t.objectStore("pending").delete(sid); t.objectStore("pendingChunks").delete(IDBKeyRange.bound([sid, 0], [sid, Number.MAX_SAFE_INTEGER])); });
+  },
 };
 
 /* ---------------- 상태 ---------------- */
@@ -267,7 +309,320 @@ const S = {
 };
 const typeName = (id) => (S.types.find((t) => t.id === id) || { name: `회의 종류 ${id}` }).name;
 
-/* ---------------- 녹음 ---------------- */
+/* ---- 녹음 상태 감시 로직: 서버판 frontend/src/lib/recordingHealth.ts 를 그대로 묶은 것 ---- */
+"use strict";
+var RH = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+
+  // src/lib/recordingHealth.ts
+  var recordingHealth_exports = {};
+  __export(recordingHealth_exports, {
+    KIND_LABEL: () => KIND_LABEL,
+    MOBILE_LIMITS: () => MOBILE_LIMITS,
+    RecordingHealth: () => RecordingHealth,
+    ZERO_LEVEL: () => ZERO_LEVEL,
+    fmtDur: () => fmtDur,
+    fmtMs: () => fmtMs,
+    mergeSpans: () => mergeSpans,
+    missingSeqs: () => missingSeqs,
+    wakeLockMessage: () => wakeLockMessage
+  });
+  var KIND_LABEL = {
+    hidden: "\uD654\uBA74 \uAEBC\uC9D0\xB7\uB2E4\uB978 \uC571",
+    frozen: "\uBE0C\uB77C\uC6B0\uC800\uAC00 \uD398\uC774\uC9C0\uB97C \uBA48\uCDA4",
+    "no-data": "\uB179\uC74C \uB370\uC774\uD130\uAC00 \uB4E4\uC5B4\uC624\uC9C0 \uC54A\uC74C",
+    muted: "\uB9C8\uC774\uD06C \uC74C\uC18C\uAC70(\uC6B4\uC601\uCCB4\uC81C\xB7\uBE0C\uB77C\uC6B0\uC800\uAC00 \uB9C9\uC74C)",
+    silent: "\uB9C8\uC774\uD06C \uC785\uB825\uC774 \uC644\uC804\uD788 0"
+  };
+  var ZERO_LEVEL = 1e-5;
+  function fmtMs(ms) {
+    const s = Math.max(0, Math.round(ms / 1e3));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor(s % 3600 / 60);
+    const ss = s % 60;
+    const p = (n) => String(n).padStart(2, "0");
+    return h ? `${h}:${p(m)}:${p(ss)}` : `${p(m)}:${p(ss)}`;
+  }
+  function fmtDur(ms) {
+    const s = Math.max(0, Math.round(ms / 1e3));
+    if (s < 60) return `${s}\uCD08`;
+    const m = Math.floor(s / 60);
+    return s % 60 ? `${m}\uBD84 ${s % 60}\uCD08` : `${m}\uBD84`;
+  }
+  function mergeSpans(spans, joinMs = 1e3) {
+    const s = spans.filter((x) => x.endMs > x.startMs).sort((a, b) => a.startMs - b.startMs);
+    const out = [];
+    for (const x of s) {
+      const last = out[out.length - 1];
+      if (last && x.startMs <= last.endMs + joinMs) {
+        last.endMs = Math.max(last.endMs, x.endMs);
+        for (const k of x.kinds) if (!last.kinds.includes(k)) last.kinds.push(k);
+      } else out.push({ startMs: x.startMs, endMs: x.endMs, kinds: [...x.kinds] });
+    }
+    return out;
+  }
+  var RecordingHealth = class {
+    constructor(now, timesliceMs = 1e3) {
+      __publicField(this, "now", now);
+      __publicField(this, "spans", []);
+      __publicField(this, "pauses", []);
+      __publicField(this, "lastChunkAt", 0);
+      __publicField(this, "zeroRun", 0);
+      __publicField(this, "zeroRunStart", 0);
+      __publicField(this, "paused", false);
+      /** 공백 뒤 몰려 들어오는 조각(멈춘 동안 브라우저가 붙잡고 있던 데이터)을 세기 위한 상태 */
+      __publicField(this, "gap", null);
+      __publicField(this, "chunks", 0);
+      __publicField(this, "bytes", 0);
+      __publicField(this, "storeFailures", 0);
+      __publicField(this, "levelUnknownChunks", 0);
+      __publicField(this, "lastLevel", null);
+      __publicField(this, "gapMs");
+      __publicField(this, "sliceMs");
+      this.sliceMs = timesliceMs;
+      this.gapMs = Math.max(3e3, timesliceMs * 3);
+    }
+    t() {
+      return this.now();
+    }
+    open(kind, at = this.t()) {
+      if (!this.spans.some((s) => s.kind === kind && s.endMs === null)) this.spans.push({ kind, startMs: at, endMs: null });
+    }
+    close(kind, at = this.t()) {
+      for (const s of this.spans) if (s.kind === kind && s.endMs === null) s.endMs = Math.max(at, s.startMs);
+    }
+    isOpen(kind) {
+      return this.spans.some((s) => s.kind === kind && s.endMs === null);
+    }
+    /** 녹음 시작 직후 */
+    begin() {
+      this.lastChunkAt = this.t();
+    }
+    setPaused(p) {
+      const at = this.t();
+      if (p && !this.paused) {
+        this.pauses.push({ startMs: at, endMs: null });
+        this.close("no-data", at);
+        this.close("silent", at);
+        this.zeroRun = 0;
+      }
+      if (!p && this.paused) {
+        for (const x of this.pauses) if (x.endMs === null) x.endMs = at;
+        this.lastChunkAt = at;
+      }
+      this.paused = p;
+    }
+    onVisibility(hidden) {
+      if (hidden) this.open("hidden");
+      else this.close("hidden");
+    }
+    onFreeze() {
+      this.open("frozen");
+    }
+    onResume() {
+      this.close("frozen");
+    }
+    onTrackMute(muted) {
+      if (muted) this.open("muted");
+      else this.close("muted");
+    }
+    /**
+     * 데이터 조각이 도착할 때마다. level은 그 순간 마이크 입력의 최댓값(모르면 null).
+     * 조각 사이가 gapMs보다 길면 그 사이는 ‘데이터 없음’ 구간이다(페이지가 멈췄을 때).
+     */
+    onChunk(size, level) {
+      const at = this.t();
+      if (!this.paused && at - this.lastChunkAt > this.gapMs) {
+        const span = { kind: "no-data", startMs: this.lastChunkAt, endMs: at };
+        this.spans.push(span);
+        this.gap = { span, start: this.lastChunkAt, end: at, got: 1, prevAt: at };
+      } else if (this.gap && at - this.gap.prevAt < this.sliceMs * 0.4) {
+        this.gap.got++;
+        this.gap.prevAt = at;
+        const covered = this.gap.got * this.sliceMs;
+        const lost = this.gap.end - this.gap.start - covered;
+        if (lost <= this.sliceMs * 1.5) this.spans = this.spans.filter((x) => x !== this.gap.span);
+        else this.gap.span.startMs = this.gap.start + covered;
+      } else this.gap = null;
+      this.lastChunkAt = at;
+      this.chunks++;
+      this.bytes += size;
+      this.lastLevel = level;
+      if (level === null) {
+        this.levelUnknownChunks++;
+        return;
+      }
+      if (level <= ZERO_LEVEL) {
+        if (this.zeroRun === 0) this.zeroRunStart = at;
+        this.zeroRun++;
+        if (this.zeroRun >= 3) this.open("silent", Math.max(0, this.zeroRunStart - 1e3));
+      } else {
+        this.zeroRun = 0;
+        this.close("silent", at);
+      }
+    }
+    onStoreFail() {
+      this.storeFailures++;
+    }
+    /** 지금 데이터가 끊겨 있는지(화면에 ‘마지막 데이터 n초 전’ 표시용) */
+    msSinceLastChunk() {
+      return this.t() - this.lastChunkAt;
+    }
+    /** 화면 기준(벽시계) ms → 녹음 위치 ms (그 전의 일시정지 시간을 뺌) */
+    toAudioMs(wallMs) {
+      let paused = 0;
+      for (const p of this.pauses) {
+        const end = p.endMs ?? this.t();
+        if (p.startMs >= wallMs) break;
+        paused += Math.min(end, wallMs) - p.startMs;
+      }
+      return Math.max(0, wallMs - paused);
+    }
+    closed(at) {
+      return this.spans.map((s) => ({ kind: s.kind, startMs: s.startMs, endMs: s.endMs ?? at }));
+    }
+    /**
+     * 화면이 다시 보일 때: ‘다시 녹음되고 있겠지’라고 가정하지 않고
+     * 실제 녹음기·마이크 상태와 방금 가려져 있던 동안의 기록을 함께 점검한다.
+     */
+    checkAfterReturn(state) {
+      const at = this.t();
+      const all = this.closed(at);
+      if (!this.paused && at - this.lastChunkAt > this.gapMs) all.push({ kind: "no-data", startMs: this.lastChunkAt, endMs: at });
+      const lastHidden = [...all].reverse().find((s) => s.kind === "hidden");
+      const msgs = [];
+      let level = "ok";
+      const bump = (l) => {
+        if (l === "error" || l === "warn" && level === "ok") level = l;
+      };
+      if (!this.paused && at - this.lastChunkAt > this.gapMs && state.recorderState === "recording") {
+        bump("error");
+        msgs.push(`\uC9C0\uAE08\uB3C4 ${fmtDur(at - this.lastChunkAt)}\uC9F8 \uB179\uC74C \uB370\uC774\uD130\uAC00 \uB4E4\uC5B4\uC624\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uC815\uC9C0 \uD6C4 \uC800\uC7A5\uD558\uACE0 \uB2E4\uC2DC \uB179\uC74C\uD558\uC138\uC694.`);
+      }
+      if (state.recorderState === "inactive" || state.recorderState === null) {
+        bump("error");
+        msgs.push("\uB179\uC74C\uAE30\uAC00 \uBA48\uCDB0 \uC788\uC2B5\uB2C8\uB2E4. \uC9C0\uAE08\uAE4C\uC9C0 \uB179\uC74C\uB41C \uBD80\uBD84\uC744 \uC800\uC7A5\uD55C \uB4A4 \uB2E4\uC2DC \uB179\uC74C\uD558\uC138\uC694.");
+      }
+      if (state.trackReadyState === "ended") {
+        bump("error");
+        msgs.push("\uB9C8\uC774\uD06C \uC5F0\uACB0\uC774 \uB04A\uACBC\uC2B5\uB2C8\uB2E4(\uC6B4\uC601\uCCB4\uC81C\uAC00 \uB9C8\uC774\uD06C\uB97C \uD68C\uC218\uD588\uC744 \uC218 \uC788\uC74C).");
+      } else if (state.trackMuted) {
+        bump("error");
+        msgs.push("\uB9C8\uC774\uD06C\uAC00 \uC9C0\uAE08\uB3C4 \uC74C\uC18C\uAC70 \uC0C1\uD0DC\uB77C \uB179\uC74C\uC774 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4. \uC815\uC9C0 \uD6C4 \uC800\uC7A5\uD558\uACE0 \uC0C8\uB85C \uB179\uC74C\uC744 \uC2DC\uC791\uD558\uC138\uC694.");
+      }
+      if (lastHidden) {
+        const from = lastHidden.startMs, to = lastHidden.endMs;
+        const overlap = (k) => all.filter((s) => s.kind === k).reduce((n, s) => n + Math.max(0, Math.min(s.endMs, to) - Math.max(s.startMs, from)), 0);
+        const dur = to - from;
+        const nd = overlap("no-data") + overlap("frozen");
+        const mu = overlap("muted");
+        const si = overlap("silent");
+        msgs.unshift(`\uD654\uBA74\uC774 \uAEBC\uC838 \uC788\uB358(\uB610\uB294 \uB2E4\uB978 \uC571\uC744 \uC4F0\uB358) ${fmtDur(dur)} \uB3D9\uC548\uC758 \uB179\uC74C \uC0C1\uD0DC\uB97C \uC810\uAC80\uD588\uC2B5\uB2C8\uB2E4.`);
+        if (nd > 1e3) {
+          bump("warn");
+          msgs.push(`\uADF8\uC911 ${fmtDur(Math.min(nd, dur))} \uB3D9\uC548 \uB179\uC74C \uB370\uC774\uD130\uAC00 \uB4E4\uC5B4\uC624\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4(\uBE0C\uB77C\uC6B0\uC800\uAC00 \uD398\uC774\uC9C0\uB97C \uBA48\uCDA4). \uC774 \uAD6C\uAC04\uC740 \uB179\uC74C\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.`);
+        }
+        if (mu > 1e3) {
+          bump("warn");
+          msgs.push(`\uADF8\uC911 ${fmtDur(Math.min(mu, dur))} \uB3D9\uC548 \uB9C8\uC774\uD06C\uAC00 \uC74C\uC18C\uAC70\uB418\uC5B4 \uC18C\uB9AC \uC5C6\uC774 \uB179\uC74C\uB410\uC2B5\uB2C8\uB2E4.`);
+        }
+        if (si > 1e3) {
+          bump("warn");
+          msgs.push(`\uADF8\uC911 ${fmtDur(Math.min(si, dur))} \uB3D9\uC548 \uB9C8\uC774\uD06C \uC785\uB825\uC774 \uC644\uC804\uD788 0\uC774\uC5C8\uC2B5\uB2C8\uB2E4(\uC6B4\uC601\uCCB4\uC81C\uAC00 \uB9C8\uC774\uD06C\uB97C \uB9C9\uC558\uC744 \uC218 \uC788\uC74C).`);
+        }
+        if (nd <= 1e3 && mu <= 1e3 && si <= 1e3 && dur > 1e3)
+          msgs.push("\uADF8\uB3D9\uC548 \uB179\uC74C \uB370\uC774\uD130\uB294 \uACC4\uC18D \uB4E4\uC5B4\uC654\uACE0 \uC74C\uC18C\uAC70\xB7\uC644\uC804 \uBB34\uC74C\uB3C4 \uAC10\uC9C0\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uB2E4\uB9CC \uC2E4\uC81C \uC18C\uB9AC\uAC00 \uB2F4\uACBC\uB294\uC9C0\uB294 \uC800\uC7A5 \uD6C4 \uD574\uB2F9 \uBD80\uBD84\uC744 \uC7AC\uC0DD\uD574 \uD655\uC778\uD558\uC138\uC694.");
+      } else if (msgs.length === 0) msgs.push("\uB179\uC74C\uAE30\uC640 \uB9C8\uC774\uD06C\uAC00 \uC815\uC0C1 \uC0C1\uD0DC\uC785\uB2C8\uB2E4.");
+      return { level, messages: msgs };
+    }
+    /** 정지 시점의 보고서 */
+    finish() {
+      const at = this.t();
+      const all = this.closed(at);
+      const suspects = mergeSpans(
+        all.filter((s) => s.kind !== "hidden").map((s) => ({ startMs: s.startMs, endMs: s.endMs, kinds: [s.kind] }))
+      );
+      const hiddenSpans = mergeSpans(all.filter((s) => s.kind === "hidden").map((s) => ({ startMs: s.startMs, endMs: s.endMs, kinds: ["hidden"] })));
+      for (const sp of suspects)
+        if (hiddenSpans.some((h) => h.startMs < sp.endMs && h.endMs > sp.startMs) && !sp.kinds.includes("hidden")) sp.kinds.push("hidden");
+      const sum = (xs) => xs.reduce((n, s) => n + (s.endMs - s.startMs), 0);
+      const suspectMs = sum(suspects), hiddenMs = sum(hiddenSpans);
+      const toA = (s) => ({ fromMs: this.toAudioMs(s.startMs), toMs: this.toAudioMs(s.endMs), kinds: s.kinds });
+      const lines = [];
+      if (suspects.length) {
+        lines.push(`\uB179\uC74C\uC774 \uBE44\uC5C8\uC744 \uC218 \uC788\uB294 \uAD6C\uAC04 ${suspects.length}\uACF3, \uD569\uACC4 ${fmtDur(suspectMs)}:`);
+        for (const s of suspects.map(toA))
+          lines.push(`  \uB179\uC74C \uC704\uCE58 ${fmtMs(s.fromMs)}\u2013${fmtMs(s.toMs)}: ${s.kinds.map((k) => KIND_LABEL[k]).join(", ")}`);
+      } else if (hiddenMs > 1e3) {
+        lines.push(`\uD654\uBA74\uC774 \uAEBC\uC84C\uAC70\uB098 \uB2E4\uB978 \uC571\uC774\uC5C8\uB358 \uC2DC\uAC04\uC774 ${fmtDur(hiddenMs)} \uC788\uC5C8\uC9C0\uB9CC, \uB370\uC774\uD130 \uB04A\uAE40\xB7\uC74C\uC18C\uAC70\xB7\uC644\uC804 \uBB34\uC74C\uC740 \uAC10\uC9C0\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uD574\uB2F9 \uBD80\uBD84\uC744 \uC7AC\uC0DD\uD574 \uC18C\uB9AC\uAC00 \uC788\uB294\uC9C0 \uD655\uC778\uD558\uC138\uC694.`);
+      } else lines.push("\uB179\uC74C \uC911 \uB04A\uAE40\xB7\uC74C\uC18C\uAC70\xB7\uC644\uC804 \uBB34\uC74C\uC774 \uAC10\uC9C0\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.");
+      if (this.storeFailures) lines.push(`\uC784\uC2DC \uBCF4\uAD00\uC5D0 \uC2E4\uD328\uD55C \uC870\uAC01 ${this.storeFailures}\uAC1C \u2014 \uC9C0\uAE08 \uC0C8\uB85C\uACE0\uCE68\uD558\uBA74 \uADF8 \uBD80\uBD84\uC740 \uBCF5\uAD6C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.`);
+      if (this.chunks && this.levelUnknownChunks / this.chunks > 0.5)
+        lines.push("\uC774 \uBE0C\uB77C\uC6B0\uC800\uC5D0\uC11C\uB294 \uB179\uC74C \uC911 \uC18C\uB9AC \uD06C\uAE30\uB97C \uD655\uC778\uD560 \uC218 \uC5C6\uC5B4 \u2018\uC644\uC804 \uBB34\uC74C\u2019 \uAC80\uC0AC\uB294 \uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
+      return {
+        chunks: this.chunks,
+        bytes: this.bytes,
+        storeFailures: this.storeFailures,
+        hiddenMs,
+        suspectMs,
+        suspects: suspects.map(toA),
+        hiddenSpans: hiddenSpans.map((h) => ({ fromMs: this.toAudioMs(h.startMs), toMs: this.toAudioMs(h.endMs) })),
+        levelUnknownChunks: this.levelUnknownChunks,
+        lines
+      };
+    }
+  };
+  function missingSeqs(seqs) {
+    const set = new Set(seqs);
+    const max = seqs.length ? Math.max(...seqs) : -1;
+    const out = [];
+    for (let i = 0; i <= max; i++) if (!set.has(i)) out.push(i);
+    return out;
+  }
+  function wakeLockMessage(state, reason) {
+    switch (state) {
+      case "unsupported":
+        return "\uC774 \uBE0C\uB77C\uC6B0\uC800\uB294 \uD654\uBA74 \uAEBC\uC9D0 \uBC29\uC9C0\uB97C \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uB179\uC74C \uC911 \uD654\uBA74\uC774 \uAEBC\uC9C0\uC9C0 \uC54A\uAC8C \uD734\uB300\uD3F0 \uC124\uC815\uC5D0\uC11C \u2018\uD654\uBA74 \uC790\uB3D9 \uAEBC\uC9D0\u2019 \uC2DC\uAC04\uC744 \uB298\uB9AC\uAC70\uB098 \uD654\uBA74\uC744 \uAC00\uB054 \uB20C\uB7EC \uC8FC\uC138\uC694.";
+      case "requesting":
+        return "\uD654\uBA74 \uAEBC\uC9D0 \uBC29\uC9C0\uB97C \uC694\uCCAD\uD558\uB294 \uC911\uC785\uB2C8\uB2E4.";
+      case "on":
+        return "\uD654\uBA74 \uAEBC\uC9D0 \uBC29\uC9C0 \uCF1C\uC9D0 \u2014 \uB179\uC74C \uC911 \uD654\uBA74\uC774 \uC790\uB3D9\uC73C\uB85C \uAEBC\uC9C0\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4(\uC804\uC6D0 \uBC84\uD2BC\uC73C\uB85C \uB044\uAC70\uB098 \uB2E4\uB978 \uC571\uC73C\uB85C \uAC00\uBA74 \uD574\uC81C\uB429\uB2C8\uB2E4).";
+      case "released":
+        return "\uD654\uBA74 \uAEBC\uC9D0 \uBC29\uC9C0\uAC00 \uD574\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4(\uD654\uBA74\uC774 \uAEBC\uC84C\uAC70\uB098 \uB2E4\uB978 \uC571\uC73C\uB85C \uC804\uD658, \uB610\uB294 \uC808\uC804 \uBAA8\uB4DC). \uB179\uC74C \uC911\uC774\uBA74 \uD654\uBA74\uC5D0 \uB3CC\uC544\uC62C \uB54C \uB2E4\uC2DC \uCF2D\uB2C8\uB2E4.";
+      case "failed":
+        return `\uD654\uBA74 \uAEBC\uC9D0 \uBC29\uC9C0\uB97C \uCF1C\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4${reason ? ` (${reason})` : ""}. \uC808\uC804 \uBAA8\uB4DC\xB7\uBE0C\uB77C\uC6B0\uC800 \uC815\uCC45 \uB54C\uBB38\uC77C \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uD734\uB300\uD3F0 \uC124\uC815\uC5D0\uC11C \uD654\uBA74 \uC790\uB3D9 \uAEBC\uC9D0 \uC2DC\uAC04\uC744 \uB298\uB9AC\uC138\uC694.`;
+      default:
+        return "\uD654\uBA74 \uAEBC\uC9D0 \uBC29\uC9C0 \uAEBC\uC9D0";
+    }
+  }
+  var MOBILE_LIMITS = "\uC6F9 \uBE0C\uB77C\uC6B0\uC800\uB294 \uD654\uBA74 \uC7A0\uAE08\uC774\uB098 \uB2E4\uB978 \uC571 \uC0AC\uC6A9 \uC911\uC758 \uB179\uC74C\uC744 \uBCF4\uC7A5\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. Android\xB7iOS\uAC00 \uBC31\uADF8\uB77C\uC6B4\uB4DC \uD0ED\uC744 \uBA48\uCD94\uAC70\uB098 \uB9C8\uC774\uD06C\uB97C \uB9C9\uC744 \uC218 \uC788\uAE30 \uB54C\uBB38\uC785\uB2C8\uB2E4. \uB179\uC74C \uC911\uC5D0\uB294 \uC774 \uD654\uBA74\uC744 \uCF1C \uB454 \uCC44\uB85C \uB450\uC138\uC694. 1\uC2DC\uAC04 \uC774\uC0C1\xB7\uD654\uBA74\uC744 \uB048 \uC0C1\uD0DC\uC758 \uB179\uC74C\uC774 \uAF2D \uD544\uC694\uD558\uBA74 \uD734\uB300\uD3F0 \uAE30\uBCF8 \uB179\uC74C \uC571 \uAC19\uC740 \uB124\uC774\uD2F0\uBE0C \uC571\uC73C\uB85C \uB179\uC74C\uD558\uB294 \uD3B8\uC774 \uC548\uC804\uD569\uB2C8\uB2E4.";
+  return __toCommonJS(recordingHealth_exports);
+})();
+
+/* ---------------- 녹음 (모바일 화면 꺼짐·백그라운드 대응) ----------------
+   - 화면 꺼짐 방지(Wake Lock): ‘녹음 시작’을 누를 때 요청, 화면이 다시 보이면 녹음 중일 때만 재요청, 정지 시 해제
+   - 녹음기 start/pause/resume/stop/error, 마이크 트랙 mute/unmute/ended, 화면 visibilitychange·freeze/resume·pagehide 감시
+   - 화면이 다시 보이면 ‘재개됐겠지’라고 가정하지 않고 실제 녹음기·트랙 상태와 그동안의 데이터를 점검(RH.RecordingHealth)
+   - 1초 조각을 받을 때마다 이 브라우저(IndexedDB)에 임시 보관 → 탭이 정지·종료돼도 다음에 열면 복구, 빠진 조각 확인
+   - 정지·오류·페이지 이탈 시 타이머·리스너·AudioContext·마이크 트랙·Wake Lock 정리 */
 const R = {
   state: "idle", // idle | requesting | recording | paused | stopping | confirm | saving | saved | error
   typeId: null, error: null, notice: null,
@@ -275,10 +630,41 @@ const R = {
   startedAt: null, elapsed: 0, runStart: 0, timerId: null,
   blob: null, endedAt: null, savedId: null, discardAsk: false,
   audioCtx: null, analyser: null, raf: 0,
+  sid: null, seq: 0, health: null, report: null, returnCheck: null, detach: null, liveId: 0,
+  storeChain: Promise.resolve(), recovered: null,
 };
 const STATE_LABEL = { idle: "대기", requesting: "마이크 확인 중", recording: "녹음 중", paused: "일시정지", stopping: "정지 중", confirm: "저장 확인", saving: "저장 중", saved: "저장 완료", error: "오류" };
 const busy = () => ["requesting", "recording", "paused", "stopping", "confirm", "saving"].includes(R.state);
 const elapsedNow = () => R.elapsed + (R.state === "recording" ? (performance.now() - R.runStart) / 1000 : 0);
+
+/* --- 화면 꺼짐 방지 --- */
+const WAKE = { sentinel: null, want: false, state: ("wakeLock" in navigator && navigator.wakeLock) ? "off" : "unsupported", reason: "", pending: null };
+const wakeSupported = () => "wakeLock" in navigator && !!navigator.wakeLock;
+function wakeRequest() {
+  WAKE.want = true;
+  if (!wakeSupported()) { WAKE.state = "unsupported"; updateLive(); return Promise.resolve(false); }
+  if (WAKE.sentinel && !WAKE.sentinel.released) { WAKE.state = "on"; updateLive(); return Promise.resolve(true); }
+  if (document.visibilityState !== "visible") { WAKE.state = "released"; updateLive(); return Promise.resolve(false); }
+  if (WAKE.pending) return WAKE.pending;
+  WAKE.state = "requesting"; updateLive();
+  WAKE.pending = navigator.wakeLock.request("screen").then((s) => {
+    if (!WAKE.want) { s.release().catch(() => { }); WAKE.state = "off"; return false; }
+    WAKE.sentinel = s; WAKE.reason = ""; WAKE.state = "on";
+    s.addEventListener("release", () => { if (WAKE.sentinel !== s) return; WAKE.sentinel = null; WAKE.state = WAKE.want ? "released" : "off"; updateLive(); });
+    return true;
+  }).catch((e) => { WAKE.reason = (e && e.name) || String(e); WAKE.state = "failed"; return false; })
+    .finally(() => { WAKE.pending = null; updateLive(); });
+  return WAKE.pending;
+}
+function wakeRelease() {
+  WAKE.want = false;
+  const s = WAKE.sentinel; WAKE.sentinel = null;
+  if (s && !s.released) s.release().catch(() => { });
+  WAKE.reason = ""; WAKE.state = wakeSupported() ? "off" : "unsupported";
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && WAKE.want && !(WAKE.sentinel && !WAKE.sentinel.released)) wakeRequest();
+});
 
 function pickMime() {
   const c = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
@@ -291,46 +677,73 @@ function micErrorMessage(e) {
   const n = e && e.name;
   if (n === "NotAllowedError" || n === "SecurityError") return "마이크 사용 권한이 거부되었습니다. 브라우저 주소창의 마이크 아이콘(또는 사이트 설정)에서 허용한 뒤 다시 시작하세요.";
   if (n === "NotFoundError" || n === "OverconstrainedError") return "연결된 마이크를 찾을 수 없습니다. 마이크를 연결한 뒤 다시 시작하세요.";
-  if (n === "NotReadableError" || n === "AbortError") return "마이크를 열 수 없습니다. 다른 프로그램(화상회의 등)이 마이크를 쓰고 있는지 확인하세요.";
-  if (n === "NotSupportedError" || n === "TypeError") return "이 브라우저 환경에서는 마이크를 열 수 없습니다. 최신 Chrome·Edge·Firefox·Safari에서 파일을 직접 열거나 https 주소에서 사용하세요.";
+  if (n === "NotReadableError" || n === "AbortError") return "마이크를 열 수 없습니다. 다른 프로그램(화상회의·통화 등)이 마이크를 쓰고 있는지 확인하세요.";
+  if (n === "NotSupportedError" || n === "TypeError") return "이 브라우저 환경에서는 마이크를 열 수 없습니다. 최신 Chrome·Edge·Firefox·Safari에서 https 주소로 여세요.";
   return `녹음을 시작하지 못했습니다: ${e && e.message ? e.message : e}`;
 }
 
+/* --- 임시 보관(IndexedDB) --- */
+function storeJob(job) {
+  R.storeChain = R.storeChain.then(job).catch(() => { R.health?.onStoreFail(); updateLive(); });
+}
+
 async function startRecording() {
-  if (busy()) return;
+  if (busy()) return; // 중복 시작 방지(아래에서 곧바로 requesting으로 바꿈)
   if (!R.typeId) { R.error = "회의 종류를 먼저 선택하세요."; render(); return; }
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-    R.state = "error"; R.error = "이 환경에서는 마이크를 사용할 수 없습니다. 파일을 내려받아 Chrome·Edge 등 최신 브라우저로 직접 열거나 https 주소에서 여세요."; render(); return;
+    R.state = "error"; R.error = "이 환경에서는 마이크를 사용할 수 없습니다. https 주소(예: GitHub Pages)에서 열거나 PC에서는 파일을 직접 여세요."; render(); return;
   }
   const mime = pickMime();
   if (mime === null) { R.state = "error"; R.error = "이 브라우저는 녹음(MediaRecorder)을 지원하지 않습니다. 최신 Chrome·Edge·Firefox·Safari를 사용하세요."; render(); return; }
-  R.state = "requesting"; R.error = null; R.notice = null; R.savedId = null; render();
+  R.state = "requesting"; R.error = null; R.notice = null; R.savedId = null; R.report = null; R.returnCheck = null; R.recovered = null;
+  // 화면 꺼짐 방지는 사용자가 누른 동작 안에서 바로 요청한다(권한 창을 기다리기 전에)
+  wakeRequest();
+  render();
   try {
     R.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-  } catch (e) { R.state = "error"; R.error = micErrorMessage(e); render(); return; }
+  } catch (e) { wakeRelease(); R.state = "error"; R.error = micErrorMessage(e); render(); return; }
   try {
     R.recorder = new MediaRecorder(R.stream, mime ? { mimeType: mime } : undefined);
-  } catch (e) { stopTracks(); R.state = "error"; R.error = `녹음기를 만들지 못했습니다: ${e.message || e}`; render(); return; }
+  } catch (e) { stopTracks(); wakeRelease(); R.state = "error"; R.error = `녹음기를 만들지 못했습니다: ${e.message || e}`; render(); return; }
   R.mime = R.recorder.mimeType || mime || "audio/webm";
-  R.chunks = [];
-  R.recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) R.chunks.push(ev.data); };
+  R.chunks = []; R.seq = 0;
+  R.sid = `rec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  R.health = new RH.RecordingHealth(() => performance.now(), 1000);
+  const sid = R.sid, meta = { sid, typeId: R.typeId, mime: R.mime, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), elapsed: 0, bytes: 0, state: "recording" };
+  storeJob(() => DB.pendingStart(meta));
+  R.recorder.ondataavailable = (ev) => {
+    if (!ev.data || !ev.data.size) return;
+    R.chunks.push(ev.data);
+    R.health?.onChunk(ev.data.size, sampleLevel());
+    const seq = R.seq++, blob = ev.data, el = elapsedNow();
+    storeJob(() => DB.pendingChunk(sid, seq, blob, el));
+  };
   R.recorder.onerror = (ev) => { R.notice = `녹음 중 오류가 발생했습니다(${ev.error?.name || "알 수 없음"}). 지금까지 녹음된 내용을 저장할 수 있습니다.`; finishRecording(); };
   R.recorder.onstop = onRecorderStopped;
+  R.recorder.onstart = R.recorder.onpause = R.recorder.onresume = updateLive;
   R.stream.getAudioTracks().forEach((t) => (t.onended = () => {
-    if (R.state === "recording" || R.state === "paused") { R.notice = "녹음 중 마이크 연결이 끊어졌습니다. 지금까지 녹음된 내용을 저장할 수 있습니다."; finishRecording(); }
+    if (R.state === "recording" || R.state === "paused") { R.notice = "녹음 중 마이크 연결이 끊어졌습니다(운영체제가 마이크를 회수했을 수 있음). 지금까지 녹음된 내용을 저장할 수 있습니다."; finishRecording(); }
   }));
-  R.recorder.start(1000);
-  R.startedAt = new Date().toISOString(); R.elapsed = 0; R.runStart = performance.now();
+  startMeter();
+  attachMonitors();
+  try { R.recorder.start(1000); }
+  catch (e) { detachMonitors(); stopTracks(); stopMeter(); wakeRelease(); R.state = "error"; R.error = `녹음기를 시작하지 못했습니다: ${e.name || e}`; render(); return; }
+  R.startedAt = meta.startedAt; R.elapsed = 0; R.runStart = performance.now();
+  R.health.begin();
   R.state = "recording";
-  startMeter(); tick(); render();
+  tick(); render();
 }
 function pauseRecording() {
   if (R.state !== "recording" || R.recorder?.state !== "recording") return;
-  R.recorder.pause(); R.elapsed += (performance.now() - R.runStart) / 1000; R.state = "paused"; render();
+  R.recorder.pause(); R.elapsed += (performance.now() - R.runStart) / 1000; R.health?.setPaused(true);
+  try { R.recorder.requestData(); } catch { /* 다음 조각에 포함 */ }
+  R.state = "paused"; render();
 }
 function resumeRecording() {
   if (R.state !== "paused" || R.recorder?.state !== "paused") return;
-  R.recorder.resume(); R.runStart = performance.now(); R.state = "recording"; render();
+  R.recorder.resume(); R.runStart = performance.now(); R.health?.setPaused(false); R.state = "recording";
+  wakeRequest(); // 사용자가 누른 동작 — 해제돼 있었다면 다시 켬
+  render();
 }
 function finishRecording() {
   if (!(R.state === "recording" || R.state === "paused")) return;
@@ -339,8 +752,11 @@ function finishRecording() {
   if (R.recorder && R.recorder.state !== "inactive") R.recorder.stop(); else onRecorderStopped();
 }
 function onRecorderStopped() {
-  stopTracks(); stopMeter(); clearInterval(R.timerId);
+  R.report = R.health ? R.health.finish() : null;
+  detachMonitors(); stopTracks(); stopMeter(); clearInterval(R.timerId); wakeRelease();
   R.endedAt = new Date().toISOString();
+  const sid = R.sid, el = R.elapsed;
+  storeJob(() => DB.pendingStop(sid, el));
   R.blob = new Blob(R.chunks, { type: (R.mime || "audio/webm").split(";")[0] });
   if (!R.blob.size) { R.state = "error"; R.error = "녹음된 소리가 없습니다. 마이크를 확인하고 다시 녹음하세요."; R.blob = null; render(); return; }
   R.state = "confirm"; R.discardAsk = false; render();
@@ -354,18 +770,134 @@ function startMeter() {
   try {
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     R.audioCtx = new AC(); const src = R.audioCtx.createMediaStreamSource(R.stream);
-    R.analyser = R.audioCtx.createAnalyser(); R.analyser.fftSize = 512; src.connect(R.analyser);
+    if (R.audioCtx.state === "suspended") R.audioCtx.resume().catch(() => { });
+    R.analyser = R.audioCtx.createAnalyser(); R.analyser.fftSize = 2048; src.connect(R.analyser);
     const buf = new Uint8Array(R.analyser.fftSize);
     const loop = () => {
+      if (!R.analyser) return;
       R.analyser.getByteTimeDomainData(buf); let peak = 0;
       for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
       const el = $("#meter i"); if (el) el.style.width = (R.state === "recording" ? Math.min(100, peak / 64 * 100) : 0) + "%";
       R.raf = requestAnimationFrame(loop);
     };
     loop();
-  } catch { /* 소리 크기 표시는 선택 기능 */ }
+  } catch { R.audioCtx = null; R.analyser = null; /* 소리 크기 표시는 선택 기능 */ }
 }
-function stopMeter() { cancelAnimationFrame(R.raf); try { R.audioCtx?.close(); } catch { } R.audioCtx = null; }
+/* 데이터 조각이 올 때 그 순간의 입력 최댓값(화면이 꺼져 rAF가 멈춰도 동작). 모르면 null */
+const levelBuf = new Float32Array(2048);
+function sampleLevel() {
+  if (!R.analyser || !R.audioCtx || R.audioCtx.state !== "running") return null;
+  R.analyser.getFloatTimeDomainData(levelBuf);
+  let p = 0; for (let i = 0; i < levelBuf.length; i++) p = Math.max(p, Math.abs(levelBuf[i]));
+  return p;
+}
+function stopMeter() { cancelAnimationFrame(R.raf); try { R.audioCtx?.close(); } catch { } R.audioCtx = null; R.analyser = null; }
+
+/* --- 화면·트랙 감시 --- */
+function attachMonitors() {
+  const h = R.health, track = R.stream.getAudioTracks()[0];
+  let checkTimer = 0;
+  const onMute = () => { h.onTrackMute(true); updateLive(); render(); };
+  const onUnmute = () => { h.onTrackMute(false); updateLive(); render(); };
+  const onVis = () => {
+    const hidden = document.visibilityState !== "visible";
+    h.onVisibility(hidden);
+    clearTimeout(checkTimer);
+    if (!hidden) {
+      if (R.audioCtx && R.audioCtx.state === "suspended") R.audioCtx.resume().catch(() => { });
+      // 돌아온 직후에는 멈춘 동안 붙잡혀 있던 데이터가 몰려 올 수 있어 잠깐 기다린 뒤 점검
+      R.returnCheck = { level: "ok", pending: true, messages: ["화면에 돌아왔습니다. 녹음기·마이크 상태와 그동안의 녹음 데이터를 확인하는 중입니다…"] };
+      render();
+      checkTimer = setTimeout(() => {
+        const t = R.stream?.getAudioTracks()[0];
+        R.returnCheck = h.checkAfterReturn({ recorderState: R.recorder?.state ?? null, trackReadyState: t?.readyState ?? null, trackMuted: t?.muted ?? null });
+        render();
+      }, 2500);
+    }
+    updateLive();
+  };
+  const onFreeze = () => h.onFreeze();
+  const onResume = () => { h.onResume(); updateLive(); };
+  const onPageHide = () => { if (R.recorder?.state === "recording") { try { R.recorder.requestData(); } catch { } } };
+  track?.addEventListener("mute", onMute); track?.addEventListener("unmute", onUnmute);
+  if (track?.muted) h.onTrackMute(true);
+  document.addEventListener("visibilitychange", onVis);
+  document.addEventListener("freeze", onFreeze); document.addEventListener("resume", onResume);
+  window.addEventListener("pagehide", onPageHide);
+  if (document.visibilityState !== "visible") h.onVisibility(true);
+  R.liveId = setInterval(updateLive, 1000);
+  R.detach = () => {
+    clearInterval(R.liveId); clearTimeout(checkTimer);
+    track?.removeEventListener("mute", onMute); track?.removeEventListener("unmute", onUnmute);
+    document.removeEventListener("visibilitychange", onVis);
+    document.removeEventListener("freeze", onFreeze); document.removeEventListener("resume", onResume);
+    window.removeEventListener("pagehide", onPageHide);
+    if (R.recorder) R.recorder.onstart = R.recorder.onpause = R.recorder.onresume = null;
+  };
+}
+function detachMonitors() { R.detach?.(); R.detach = null; R.returnCheck = null; }
+
+/* 실제 상태 */
+function liveState() {
+  const h = R.health, t = R.stream?.getAudioTracks()[0], rs = R.recorder?.state ?? null;
+  const ms = h ? h.msSinceLastChunk() : 0;
+  return { rs, track: t?.readyState ?? null, muted: !!t?.muted, chunks: h?.chunks || 0, fails: h?.storeFailures || 0, level: h?.lastLevel ?? null, silent: !!h?.isOpen("silent"), stalled: rs === "recording" && h && ms > h.gapMs, ms };
+}
+function displayLabel() {
+  const st = R.state;
+  if (st === "recording" || st === "paused") {
+    const l = liveState();
+    if (l.track === "ended") return ["마이크 연결 끊김", "error"];
+    if (l.muted) return ["마이크 음소거", "error"];
+    if (st === "recording" && l.stalled) return ["녹음 데이터 끊김", "error"];
+  }
+  return [STATE_LABEL[st], st];
+}
+function healthPanelHtml() {
+  const l = liveState();
+  const row = (label, value, tone, id) => `<div class="hs-row hs-${tone}" data-testid="${id}"><span class="hs-label">${label}</span><span class="hs-value">${esc(value)}</span></div>`;
+  const wakeText = { on: "켜짐", unsupported: "지원 안 됨", failed: `실패${WAKE.reason ? ` (${WAKE.reason})` : ""}`, released: "해제됨", requesting: "요청 중", off: "꺼짐" }[WAKE.state];
+  const problem = l.track === "ended" || l.muted || l.silent || l.stalled;
+  const rc = R.returnCheck;
+  return `${rc ? `<div class="return-check rc-${rc.level}" role="alert" data-testid="return-check"><b>${rc.pending ? "화면 복귀 점검 중…" : rc.level === "ok" ? "화면 복귀 점검: 이상 없음" : rc.level === "warn" ? "화면 복귀 점검: 녹음이 빈 구간이 있습니다" : "화면 복귀 점검: 녹음에 문제가 있습니다"}</b>
+      <ul>${rc.messages.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>${rc.pending ? "" : `<button class="btn small" id="rc-ok">확인</button>`}</div>` : ""}
+    ${problem && !rc ? `<div class="alert err" role="alert" data-testid="live-alert">${l.track === "ended" ? "마이크 연결이 끊겼습니다." : l.muted ? "마이크가 음소거되었습니다. 지금은 소리가 녹음되지 않습니다." : l.stalled ? "녹음 데이터가 들어오지 않고 있습니다." : "마이크 입력이 완전히 0입니다."} 이 화면을 켜 둔 채로 두고, 계속되면 정지 후 저장하고 다시 녹음하세요.</div>` : ""}
+    <div class="hs-grid">
+      ${row("녹음기", l.rs === "recording" ? "녹음 중" : l.rs === "paused" ? "일시정지" : l.rs === "inactive" ? "멈춤" : "확인 중", l.rs === "recording" ? "ok" : l.rs === "paused" ? "warn" : "bad", "hs-recorder")}
+      ${row("마이크", l.track === "ended" ? "연결 끊김" : l.muted ? "음소거됨 — 지금 소리가 녹음되지 않습니다" : l.track === "live" ? "연결됨" : "확인 중", l.track === "ended" || l.muted ? "bad" : l.track === "live" ? "ok" : "muted", "hs-mic")}
+      ${row("화면 꺼짐 방지", wakeText, WAKE.state === "on" ? "ok" : WAKE.state === "requesting" ? "muted" : "warn", "hs-wake")}
+      ${row("녹음 데이터", l.rs !== "recording" ? `${l.chunks}개 조각 수신` : l.stalled ? `${RH.fmtDur(l.ms)}째 데이터가 들어오지 않음` : `정상 수신 (${l.chunks}개 조각, 이 브라우저에 임시 보관${l.fails ? ` — 보관 실패 ${l.fails}개` : ""})`, l.rs !== "recording" ? "muted" : l.stalled || l.fails ? "bad" : "ok", "hs-data")}
+      ${row("소리 입력", l.rs !== "recording" ? "-" : l.silent ? "완전 무음 — 운영체제가 마이크를 막았을 수 있습니다" : l.level === null ? "확인할 수 없음" : l.level < 0.003 ? "조용함(입력 있음)" : "소리 입력 있음", l.rs !== "recording" ? "muted" : l.silent ? "bad" : l.level === null ? "muted" : "ok", "hs-level")}
+    </div>
+    ${WAKE.state !== "on" ? `<p class="small muted" data-testid="wake-note">${esc(RH.wakeLockMessage(WAKE.state, WAKE.reason))} ${["failed", "released", "off"].includes(WAKE.state) ? `<button class="btn small" id="wake-retry" data-testid="wake-retry">화면 꺼짐 방지 다시 켜기</button>` : ""}</p>` : ""}
+    <p class="small muted">녹음 중에는 이 화면을 켜 둔 채로 두세요. 화면을 끄거나 다른 앱으로 가면 휴대폰이 녹음을 멈추거나 빈 소리로 녹음할 수 있습니다.</p>`;
+}
+function bindHealthPanel(el) {
+  const ok = $("#rc-ok", el); if (ok) ok.onclick = () => { R.returnCheck = null; render(); };
+  const wr = $("#wake-retry", el); if (wr) wr.onclick = () => wakeRequest();
+}
+/* 1초마다(또는 이벤트 때) 상태 칸만 다시 그린다 — 전체를 다시 그리지 않아 버튼 누르기를 방해하지 않음 */
+function updateLive() {
+  const el = $("#health-panel"); if (!el || !(R.state === "recording" || R.state === "paused" || R.state === "stopping")) return;
+  el.innerHTML = healthPanelHtml(); bindHealthPanel(el);
+  const [label, cls] = displayLabel(); const st = $("[data-testid=rec-state]");
+  if (st) { st.className = `state ${cls}`; st.innerHTML = `<span class="dot"></span>${esc(label)}`; }
+}
+
+function preCheckHtml() {
+  const recOk = window.isSecureContext && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined";
+  const row = (label, value, tone, id) => `<div class="hs-row hs-${tone}" data-testid="${id}"><span class="hs-label">${label}</span><span class="hs-value">${esc(value)}</span></div>`;
+  return `<details class="pre-check" data-testid="pre-check" ${S.preOpen ? "open" : ""}><summary>녹음 전 점검 ${!recOk ? `<span class="badge review">확인 필요</span>` : !wakeSupported() ? `<span class="badge review">화면 꺼짐 방지 없음</span>` : ""}</summary>
+    <div class="hs-grid" style="margin-top:8px">
+      ${row("브라우저 녹음", recOk ? "지원" : !window.isSecureContext ? "https 주소가 아니라 사용 불가" : "이 브라우저는 녹음을 지원하지 않음", recOk ? "ok" : "bad", "pc-rec")}
+      ${row("마이크 권한", { granted: "허용됨", denied: "거부됨 — 주소창의 사이트 설정에서 허용하세요", prompt: "녹음 시작 때 물어봄" }[PERM] || "확인할 수 없음(녹음 시작 때 물어봄)", PERM === "granted" ? "ok" : PERM === "denied" ? "bad" : "muted", "pc-perm")}
+      ${row("화면 꺼짐 방지", wakeSupported() ? "지원 — 녹음 시작 때 켭니다" : "지원 안 됨 — 휴대폰 설정에서 화면 자동 꺼짐 시간을 늘리세요", wakeSupported() ? "ok" : "warn", "pc-wake")}
+      ${row("임시 보관(새로고침 복구)", S.dbError ? "사용 불가(시크릿 창 등)" : "사용 가능", S.dbError ? "warn" : "ok", "pc-store")}
+    </div><p class="small muted">${esc(RH.MOBILE_LIMITS)}</p></details>`;
+}
+let PERM = "unknown";
+try { navigator.permissions?.query({ name: "microphone" }).then((s) => { PERM = s.state; s.onchange = () => { PERM = s.state; if (S.tab === "record" && !busy()) render(); }; if (S.tab === "record" && !busy()) render(); }).catch(() => { }); } catch { }
+
 const recFileName = () => `${safeName(typeName(R.typeId))}_${stamp(R.startedAt)}.${extOf(R.mime)}`;
 
 async function saveRecording() {
@@ -374,19 +906,43 @@ async function saveRecording() {
   const m = {
     typeId: R.typeId, startedAt: R.startedAt, endedAt: R.endedAt, durationSec: Math.round(R.elapsed * 10) / 10,
     mime: R.blob.type, size: R.blob.size, fileName: recFileName(), createdAt: new Date().toISOString(),
-    transcript: null, analysis: null,
+    transcript: null, analysis: null, recordingReport: R.report ? { lines: R.report.lines, suspects: R.report.suspects, suspectMs: R.report.suspectMs, hiddenMs: R.report.hiddenMs } : null,
   };
   try {
     R.savedId = await DB.addWithAudio(m, R.blob);
-    R.state = "saved"; R.blob = null; R.notice = null;
+    const sid = R.sid; if (sid) storeJob(() => DB.pendingDelete(sid));
+    R.state = "saved"; R.blob = null; R.notice = null; R.chunks = []; R.sid = null;
   } catch (e) {
     R.state = "confirm";
-    R.error = `브라우저 저장소에 저장하지 못했습니다(${e?.name || e}). 저장 공간이 부족하거나 시크릿 창일 수 있습니다. ‘내 컴퓨터에 내려받기’로 먼저 보관하세요.`;
+    R.error = `브라우저 저장소에 저장하지 못했습니다(${e?.name || e}). 저장 공간이 부족하거나 시크릿 창일 수 있습니다. ‘내 컴퓨터에 내려받기’로 먼저 보관하세요. 녹음은 임시 보관소에 남아 있어 다시 시도할 수 있습니다.`;
   }
   render();
 }
-function discardRecording() { R.blob = null; R.chunks = []; R.state = "idle"; R.discardAsk = false; R.notice = null; R.error = null; toast("녹음을 버렸습니다. 저장된 내용은 없습니다."); render(); }
+function discardRecording() {
+  const sid = R.sid; if (sid) storeJob(() => DB.pendingDelete(sid));
+  R.blob = null; R.chunks = []; R.sid = null; R.report = null; R.state = "idle"; R.discardAsk = false; R.notice = null; R.error = null;
+  toast("녹음을 버렸습니다. 저장된 내용은 없습니다."); render(); refreshPending();
+}
 window.addEventListener("beforeunload", (e) => { if (busy() || STT.running) { e.preventDefault(); e.returnValue = ""; } });
+
+/* --- 끊긴 녹음 복구 --- */
+let PENDING = [];
+async function refreshPending() {
+  try { PENDING = (await DB.pendingList()).filter((p) => p.sid !== R.sid && p.bytes > 0); } catch { PENDING = []; }
+  if (S.tab === "record" && !busy()) render();
+}
+async function recoverPending(p) {
+  if (busy()) return;
+  const r = await DB.pendingLoad(p.sid).catch(() => null);
+  if (!r) { toast("임시 보관된 녹음을 읽지 못했습니다."); return; }
+  R.typeId = p.typeId; R.mime = p.mime; R.startedAt = p.startedAt; R.endedAt = p.updatedAt; R.elapsed = p.elapsed;
+  R.blob = r.blob; R.sid = p.sid; R.report = null; R.error = null;
+  R.notice = (p.state === "recording" ? "탭 종료·브라우저 정지·새로고침 등으로 끊긴 녹음을 복구했습니다. 끊기기 직전 약 1초는 빠졌을 수 있습니다." : "저장 여부를 정하기 전에 페이지를 떠났던 녹음입니다.") +
+    (r.missing.length ? ` 임시 보관 조각 ${r.missing.length}개가 빠져 있어(보관 실패) 그 부분(약 ${r.missing.length}초)은 소리가 끊기거나 재생이 안 될 수 있습니다.` : " 임시 보관 조각은 빠짐없이 이어져 있습니다.");
+  R.state = "confirm"; R.discardAsk = false;
+  PENDING = PENDING.filter((x) => x.sid !== p.sid);
+  render();
+}
 
 /* ---------------- 근거 확인 ---------------- */
 const norm = (s) => cleanText(s).replace(/\s+/g, " ").trim();
@@ -442,6 +998,11 @@ function renderRecord(box) {
   const st = R.state;
   const lockTypes = busy();
   box.innerHTML = `
+  ${PENDING.length && !busy() ? `<section class="card recover" data-testid="recovery-banner"><h2>저장되지 않은 녹음이 있습니다</h2>
+    <p class="small muted">탭이 닫히거나 브라우저가 멈춰 저장 확인 전에 끊긴 녹음입니다. 이 브라우저에 1초 단위로 임시 보관된 데이터로 복구할 수 있습니다.</p>
+    ${PENDING.map((p) => `<div class="row" style="justify-content:space-between;border-top:1px solid var(--line);padding:8px 0"><span><b>${esc(typeName(p.typeId))}</b> <span class="small muted">${fmtDate(p.startedAt)} ${fmtTime(p.startedAt)} 시작 · 약 ${hms(p.elapsed)} · ${fmtSize(p.bytes)}</span></span>
+      <span class="row"><button class="btn primary small" data-recover="${esc(p.sid)}" data-testid="recover-btn">복구해서 저장 확인</button><button class="btn small" data-drop="${esc(p.sid)}">버리기</button></span></div>`).join("")}
+    <div id="drop-ask"></div></section>` : ""}
   <section class="card">
     <h2>회의 종류 선택</h2>
     <div class="types" role="group" aria-label="회의 종류">
@@ -451,7 +1012,7 @@ function renderRecord(box) {
   </section>
   <section class="card">
     <div class="recbox">
-      <div class="state ${st}" data-testid="rec-state"><span class="dot"></span>${STATE_LABEL[st]}</div>
+      <div class="state ${displayLabel()[1]}" data-testid="rec-state"><span class="dot"></span>${esc(displayLabel()[0])}</div>
       <div class="timer" id="timer" aria-live="off">${hms(st === "idle" || st === "error" ? 0 : elapsedNow())}</div>
       <div class="muted small">${R.typeId ? esc(typeName(R.typeId)) : "회의 종류를 선택하세요"}${st === "paused" ? " · 일시정지 시간은 녹음 시간에 넣지 않습니다" : ""}</div>
       <div class="meter" id="meter" aria-hidden="true"><i></i></div>
@@ -462,6 +1023,8 @@ function renderRecord(box) {
       <button class="btn" id="b-resume" ${st !== "paused" ? "disabled" : ""}>▶ 다시 시작</button>
       <button class="btn primary" id="b-stop" ${!(st === "recording" || st === "paused") ? "disabled" : ""}>■ 정지</button>
     </div>
+    ${st === "recording" || st === "paused" || st === "stopping" ? `<div class="health-panel" id="health-panel" data-testid="health-panel">${healthPanelHtml()}</div>` : ""}
+    ${!busy() && st !== "saved" ? preCheckHtml() : ""}
     ${R.error ? `<div class="alert err" role="alert" data-testid="rec-error">${esc(R.error)}</div>` : ""}
     ${R.notice && st !== "confirm" ? `<div class="alert warn">${esc(R.notice)}</div>` : ""}
     ${st === "saved" ? `<div class="alert ok" data-testid="saved">녹음을 저장했습니다. <button class="btn small" id="b-open-saved">회의 기록에서 보기</button></div>` : ""}
@@ -473,6 +1036,7 @@ function renderRecord(box) {
       <li>녹음 → 저장 → 재생·내려받기 → <b>자동 전사·화자 구분</b>(회의 기록에서 회의를 열고 ‘자동 전사 시작’) → 화자 이름 바꾸기 → 회의록 텍스트(.txt) 내려받기</li>
       <li><b>회의 결과 자동 정리</b>(결과 대시보드 → 회의 결과 정리): 핵심어·화제별 안건·결정·후속 조치 → HWPX·PDF·대시보드 이미지(PNG)·텍스트 복사</li><li>회의록 내려받기: HWPX·PDF·TXT</li>
       <li class="muted">자동 전사는 이 PC의 브라우저 안에서 실행되어 음성이 외부로 나가지 않습니다. 처음 한 번 모델 파일을 인터넷에서 내려받습니다.</li>
+      <li class="muted">${esc(RH.MOBILE_LIMITS)}</li>
     </ul>
   </section>
   ${st === "confirm" || st === "saving" ? confirmDialogHtml() : ""}`;
@@ -483,13 +1047,24 @@ function renderRecord(box) {
   $("#b-stop", box).onclick = finishRecording;
   const os = $("#b-open-saved", box); if (os) os.onclick = () => { S.tab = "meetings"; S.detailId = R.savedId; S.detailTab = "result"; R.state = "idle"; render(); };
   if (st === "confirm" || st === "saving") bindConfirm(box);
+  const hp = $("#health-panel", box); if (hp) bindHealthPanel(hp);
+  const pc = $("[data-testid=pre-check]", box); if (pc) pc.ontoggle = () => { S.preOpen = pc.open; };
+  box.querySelectorAll("[data-recover]").forEach((b) => b.onclick = () => { const p = PENDING.find((x) => x.sid === b.dataset.recover); if (p) recoverPending(p); });
+  box.querySelectorAll("[data-drop]").forEach((b) => b.onclick = () => {
+    const sid = b.dataset.drop;
+    $("#drop-ask", box).innerHTML = `<div class="alert warn">이 녹음을 버리면 되돌릴 수 없습니다.<div class="row" style="margin-top:8px"><button class="btn danger" id="drop-yes">버리기</button><button class="btn" id="drop-no">취소</button></div></div>`;
+    $("#drop-yes", box).onclick = async () => { await DB.pendingDelete(sid).catch(() => { }); refreshPending(); };
+    $("#drop-no", box).onclick = () => ($("#drop-ask", box).innerHTML = "");
+  });
 }
 
 function confirmDialogHtml() {
   const saving = R.state === "saving";
   return `<div class="dialog-back"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-t" data-testid="save-dialog">
-    <h2 id="dlg-t">녹음을 저장할까요?</h2>
+    <h2 id="dlg-t">${R.notice && /복구/.test(R.notice) ? "복구한 녹음을 저장할까요?" : "녹음을 저장할까요?"}</h2>
     ${R.notice ? `<div class="alert warn">${esc(R.notice)}</div>` : ""}
+    ${R.report ? `<div class="health-report ${R.report.suspects.length || R.report.storeFailures ? "is-warn" : ""}" data-testid="health-report"><b>녹음 점검</b><ul>${R.report.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>
+      ${R.report.suspects.length ? `<p class="small muted">표시된 녹음 위치를 재생해 소리가 있는지 확인하세요. 비어 있는 부분은 다시 녹음할 수 없으니, 필요하면 메모로 보충하세요.</p>` : ""}</div>` : ""}
     <dl class="meta">
       <dt>회의 종류</dt><dd>${esc(typeName(R.typeId))}</dd>
       <dt>시작</dt><dd>${fmtDate(R.startedAt)} ${fmtTime(R.startedAt)}</dd>
@@ -599,6 +1174,7 @@ async function renderDetail(box) {
     </dl>
     <div id="del-ask"></div>
   </section>
+  ${m.recordingReport && (m.recordingReport.suspects || []).length ? `<section class="card"><div class="health-report is-warn" data-testid="detail-health"><b>녹음 점검 (녹음할 때 기록)</b><ul>${m.recordingReport.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></div></section>` : ""}
   <section class="card"><h2>원본 음성</h2>
     ${audioUrl ? `<audio controls preload="metadata" src="${audioUrl}" data-testid="player"></audio>
       <div class="row small muted" style="margin-top:6px"><span>${esc(m.fileName)} · ${fmtSize(m.size)}</span><button class="btn small" id="dl-audio">내려받기</button></div>`
@@ -2174,6 +2750,7 @@ document.querySelectorAll("nav.tabs button").forEach((b) => b.onclick = () => {
     if (Array.isArray(saved) && saved.length === 5) S.types = saved.map((t, i) => ({ id: i + 1, name: cleanLine(t.name) || `회의 종류 ${i + 1}` }));
   } catch (e) { S.dbError = e?.message || String(e); }
   render();
+  refreshPending();
 })();
 </script>
 </body>
